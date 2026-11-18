@@ -30,15 +30,30 @@ public sealed class LiveServices : IAppServices
     public ITextTranslator? MakeAiTranslator(AiProvider provider, string key, string model, ITextTranslator? fallback, Func<string?>? game,
                                              string? instruction = null) =>
         new AiTranslator(provider, key, model, fallback, cache: TranslationCache.Shared(AppPaths.Translations, provider.EngineId(model), "en", "tr"),
-                         game: game, instruction: instruction);
+                         game: game, instruction: instruction);    public ITextTranslator? MakeAiTranslatorForLanguage(AiProvider provider, string key, string model, ITextTranslator? fallback,
+                                                        Func<string?>? game, string targetLanguage, string? instruction = null) =>
+        new AiTranslator(provider, key, model, fallback,
+            cache: TranslationCache.Shared(AppPaths.Translations, provider.EngineId(model), "en", targetLanguage),
+            game: game, instruction: instruction, targetLanguage: targetLanguage);
+
+
 
     public Task<AiTestResult> TestAiKeyAsync(AiProvider provider, string key, string model) => AiTranslator.TestAsync(provider, key, model);
+    public Task<AiTestResult> TestAiKeyForLanguageAsync(AiProvider provider, string key, string model, string targetLanguage) =>
+        AiTranslator.TestAsync(provider, key, model, targetLanguage: targetLanguage);
 
     // Yerel model: önbellekte sunucu ve model ayrı tutulur ("local:localhost:11434/qwen2.5:7b").
     public ITextTranslator? MakeLocalAiTranslator(LocalAiServer server, string key, ITextTranslator? fallback, Func<string?>? game,
                                                   string? instruction = null) =>
         new AiTranslator(AiProvider.Local, key, server.Model, fallback, cache: TranslationCache.Shared(AppPaths.Translations, server.EngineId, "en", "tr"),
                          server: server, game: game, instruction: instruction);
+    public ITextTranslator? MakeLocalAiTranslatorForLanguage(LocalAiServer server, string key, ITextTranslator? fallback,
+                                                             Func<string?>? game, string targetLanguage, string? instruction = null) =>
+        new AiTranslator(AiProvider.Local, key, server.Model, fallback,
+            cache: TranslationCache.Shared(AppPaths.Translations, server.EngineId, "en", targetLanguage),
+            server: server, game: game, instruction: instruction, targetLanguage: targetLanguage);
+
+
 
     public Task<AiTestResult> TestLocalAiAsync(LocalAiServer server, string key) =>
         AiTranslator.TestAsync(AiProvider.Local, key, server.Model, server: server);
