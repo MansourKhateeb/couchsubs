@@ -64,7 +64,8 @@ public sealed class LiveServices : IAppServices
     public IOcrModel? AdvancedOcr => advancedOcr;
     public IDubbingModel? FastDubbing { get; } = WindowsVoiceModel.Available ? new WindowsVoiceModel() : null;
     public IAudioOutput? Audio { get; } = new WindowsAudioOutput();
-    public IUpdater? Updater { get; } = new Updater();
+    // Fork-specific Arabic build: never auto-upgrade to the original Turkish-only Windows release.
+    public IUpdater? Updater { get; } = null;
     public IFirewall? Firewall { get; } = new WindowsFirewall();
     // Oyun paketleri: uygulamaya gömülü olanlar ve %LOCALAPPDATA%\CouchSubs\packs klasöründekiler.
     public GamePackLibrary? GamePacks { get; } = new(GamePackLibrary.EmbeddedPacks, GamePackLibrary.UserDirectory);
