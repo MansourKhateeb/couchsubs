@@ -15,6 +15,31 @@ public class AiTranslatorTests
 {
     private const string Secret = "sk-SECRET-123";
 
+    [Fact]
+    public void ArabicPromptExplicitlyRequestsArabicWithoutChangingTurkishDefault()
+    {
+        Assert.Contains("Arabic", AiRequest.SystemPromptWith(null, "ar"));
+        Assert.DoesNotContain("spoken Turkish", AiRequest.SystemPromptWith(null, "ar"));
+        Assert.Contains("spoken Turkish", AiRequest.SystemPromptWith(null));
+    }
+
+    [Fact]
+    public void ArabicUserRequestPreservesArabicContextLabels()
+    {
+        var prompt = AiRequest.UserMessage(["We go now."],
+            [new AiContextLine("Hello.", "مرحبًا.")], targetLanguage: "ar");
+        Assert.Contains("Arabic: مرحبًا.", prompt);
+        Assert.Contains("into Arabic", prompt);
+        Assert.DoesNotContain("Turkish:", prompt);
+    }
+
+    [Fact]
+    public void TurkishUserRequestRemainsUnchangedByDefault()
+    {
+        var prompt = AiRequest.UserMessage(["Let's go."], []);
+        Assert.Contains("into Turkish", prompt);
+    }
+
     // Eski Ollama'nın reddettiği düşünme alanı oturum boyunca hatırlanır; her test temiz başlar.
     public AiTranslatorTests() => AiTranslator.ResetThinkingRejected();
 
