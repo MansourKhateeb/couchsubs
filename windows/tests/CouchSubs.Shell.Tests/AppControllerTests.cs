@@ -358,6 +358,34 @@ public class AppControllerTests
         new(services ?? new FakeServices(), store ?? new MemoryStore(), settings ?? new MemorySettings(), sleep ?? new FakeSleep(), Localizer.ForLanguage("en"), action => action());
 
     [Fact]
+    public void ArabicCloudModeAcceptsEnglishAndDoesNotDownloadTheTurkishOfflineModel()
+    {
+        var services = new FakeServices();
+        var controller = Make(services);
+        controller.Settings = controller.Settings with { SourceLanguage = "en", TargetLanguage = "ar",
+            OnlineTranslation = true, OnlineEngine = TranslationEngine.Gemini };
+        Assert.True(controller.ArabicCloudMode);
+        Assert.True(controller.SupportsLanguage("en"));
+        Assert.False(controller.SupportsLanguage("ja"));
+        controller.StartModelDownload();
+        Assert.Equal(0, services.Translation.Downloads);
+        controller.Dispose();
+    }
+
+    [Fact]
+    public void ArabicCloudModeRequiresItsOwnGeminiKey()
+    {
+        var store = new MemoryStore();
+        var controller = Make(store: store);
+        controller.Settings = controller.Settings with { SourceLanguage = "en", TargetLanguage = "ar",
+            OnlineTranslation = true, OnlineEngine = TranslationEngine.Gemini };
+        Assert.False(controller.OnlineTranslationActive);
+        store.Save(StoreKeys.GeminiKey, "test-only-key");
+        Assert.True(controller.OnlineTranslationActive);
+        controller.Dispose();
+    }
+
+    [Fact]
     public void FreshInstallStartsAtWelcome() => Assert.Equal(OnboardingStep.Welcome, Make().Step);
 
     [Fact]
