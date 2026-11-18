@@ -62,7 +62,7 @@ public partial class SettingsWindow : Window
         // Yalnız çeviri modeli olan diller listelenir; tek dil varsa seçim gösterilmez.
         foreach (var (code, name) in Languages.Where(l => controller.SupportsLanguage(l.Code)))
             GameLanguage.Items.Add(new ComboBoxItem { Content = Localizer.Current[name], Tag = code, IsSelected = code == settings.SourceLanguage });
-        LanguageCard.Visibility = GameLanguage.Items.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        LanguageCard.Visibility = Visibility.Visible;
         (settings.FreeAreaTarget switch { ResultTarget.Pc => FreePc, ResultTarget.Both => FreeBoth, _ => FreeTv }).IsChecked = true;
         Region.Frame = controller.LastFrame;
         ObsAddress.Text = $"http://localhost:{controller.ServerPort}/obs";
@@ -846,6 +846,12 @@ public partial class SettingsWindow : Window
             OnlineTranslation = target == "ar" || s.OnlineTranslation,
             OnlineEngine = target == "ar" && s.OnlineEngine == TranslationEngine.DeepL
                 ? TranslationEngine.Gemini : s.OnlineEngine });
+        if (!loading)
+        {
+            var engine = controller.Settings.Engine;
+            Engine.SelectedItem = Engine.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == engine.ToString());
+            ShowEngine();
+        }
     }
 
     /// <summary>
