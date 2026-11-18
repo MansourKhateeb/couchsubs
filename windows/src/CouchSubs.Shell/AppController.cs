@@ -423,6 +423,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
                                               TaskContinuationOptions.OnlyOnFaulted);
             }
             var translationChanged = old.OnlineTranslation != value.OnlineTranslation || old.OnlineEngine != value.OnlineEngine
+                                     || old.SourceLanguage != value.SourceLanguage || old.TargetLanguage != value.TargetLanguage
                                      || old.GeminiModel != value.GeminiModel || old.OpenAiModel != value.OpenAiModel
                                      || old.ClaudeModel != value.ClaudeModel
                                      || old.LocalAiBaseUrl != value.LocalAiBaseUrl || old.LocalAiModel != value.LocalAiModel
