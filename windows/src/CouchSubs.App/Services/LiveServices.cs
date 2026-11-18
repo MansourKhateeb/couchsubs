@@ -30,7 +30,9 @@ public sealed class LiveServices : IAppServices
     public ITextTranslator? MakeAiTranslator(AiProvider provider, string key, string model, ITextTranslator? fallback, Func<string?>? game,
                                              string? instruction = null) =>
         new AiTranslator(provider, key, model, fallback, cache: TranslationCache.Shared(AppPaths.Translations, provider.EngineId(model), "en", "tr"),
-                         game: game, instruction: instruction);    public ITextTranslator? MakeAiTranslatorForLanguage(AiProvider provider, string key, string model, ITextTranslator? fallback,
+                         game: game, instruction: instruction);
+
+    public ITextTranslator? MakeAiTranslatorForLanguage(AiProvider provider, string key, string model, ITextTranslator? fallback,
                                                         Func<string?>? game, string targetLanguage, string? instruction = null) =>
         new AiTranslator(provider, key, model, fallback,
             cache: TranslationCache.Shared(AppPaths.Translations, provider.EngineId(model), "en", targetLanguage),
