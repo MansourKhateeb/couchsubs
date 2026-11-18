@@ -43,6 +43,8 @@ public partial class SettingsWindow : Window
         InitializeComponent();
         var settings = controller.Settings;
         DataContext = controller;
+        TargetLanguage.SelectedItem = TargetLanguage.Items.Cast<ComboBoxItem>()
+            .First(item => (string)item.Tag == settings.TargetLanguage);
         TextSize.Value = Math.Clamp(settings.Style.FontSize, TextSize.Minimum, TextSize.Maximum);
         TextSizeValue.Text = ((int)TextSize.Value).ToString();
         Position.Value = settings.Style.BottomPercent;
@@ -833,6 +835,17 @@ public partial class SettingsWindow : Window
     private void OnLanguage(object sender, SelectionChangedEventArgs e)
     {
         if (GameLanguage.SelectedItem is ComboBoxItem { Tag: string code }) Update(s => s with { SourceLanguage = code });
+    }
+
+    private void OnTargetLanguage(object sender, SelectionChangedEventArgs e)
+    {
+        if (TargetLanguage.SelectedItem is not ComboBoxItem { Tag: string target }) return;
+        Update(s => s with { TargetLanguage = target, SourceLanguage = "en",
+            GamePacks = target == "tr" && s.GamePacks,
+            SharePool = target == "tr" && s.SharePool,
+            OnlineTranslation = target == "ar" || s.OnlineTranslation,
+            OnlineEngine = target == "ar" && s.OnlineEngine == TranslationEngine.DeepL
+                ? TranslationEngine.Gemini : s.OnlineEngine });
     }
 
     /// <summary>
