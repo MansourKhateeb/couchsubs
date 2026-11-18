@@ -354,9 +354,20 @@
                 <StackPanel>
                     <TextBlock Text="{t:T 'Language'}" Style="{StaticResource DisplayText}" Margin="0,0,0,12" />
                     <c:Card x:Name="LanguageCard">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{t:T 'Game language'}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                            <ComboBox x:Name="GameLanguage" SelectionChanged="OnLanguage" />
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <TextBlock Text="{t:T 'Game language'}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                <ComboBox x:Name="GameLanguage" SelectionChanged="OnLanguage" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Subtitle language" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                <ComboBox x:Name="TargetLanguage" SelectionChanged="OnTargetLanguage" MinWidth="160">
+                                    <ComboBoxItem Content="Türkçe" Tag="tr" />
+                                    <ComboBoxItem Content="العربية (Arabic)" Tag="ar" />
+                                </ComboBox>
+                            </StackPanel>
+                            <TextBlock Text="Arabic uses Gemini, OpenAI, Claude or a local AI model. Choose a translation engine and enter your own API key in Translation settings."
+                                       TextWrapping="Wrap" Style="{StaticResource HintText}" Margin="0,8,0,0" />
                         </StackPanel>
                     </c:Card>
                 </StackPanel>
