@@ -314,6 +314,45 @@ final class AITranslationTests: XCTestCase {
         XCTAssertFalse(user(0).contains("KRATOS"))
     }
 
+    func testGeminiArabicSubtitlesAndContext() async throws {
+        let translator = AITranslator(provider: .gemini, key: secret, model: nil, fallback: WarmupFallback(),
+                                      session: FakeAI.session(), budget: RequestBudget(perMinute: 1000), targetLanguage: "ar")
+        FakeAI.replyText = #"["لنذهب الآن."]"#
+        let first = try await translator.translate("KRATOS: We go now.")
+        XCTAssertEqual(first, "KRATOS: لنذهب الآن.")
+        let system = (FakeAI.requests.first?.body["systemInstruction"] as? [String: Any])?["parts"] as? [[String: Any]]
+        XCTAssertTrue((system?.first?["text"] as? String)?.contains("concise Modern Standard Arabic") == true)
+        XCTAssertTrue(user(0).contains("only a JSON array of 1 Arabic strings"))
+
+        FakeAI.replyText = #"["وابقَ قريبًا."]"#
+        let next = try await translator.translate("And stay close.")
+        XCTAssertEqual(next, "وابقَ قريبًا.")
+        XCTAssertTrue(user(1).contains("Arabic: KRATOS: لنذهب الآن."))
+        XCTAssertFalse(user(1).contains("Turkish"))
+    }
+
+    func testGeminiArabicScreenAndTurkishCachesStaySeparate() async throws {
+        let cache = TranslationCache()
+        let turkish = make(.gemini, cache: cache)
+        let arabic = AITranslationCore(provider: .gemini, key: secret, session: FakeAI.session(), cache: cache,
+                                       budget: RequestBudget(perMinute: 1000), targetLanguage: "ar")
+        let text = "Open the gate."
+        FakeAI.replyText = #"["Kapıyı aç."]"#
+        let turkishLine = try await turkish.translate(text, fallback: local)
+        XCTAssertEqual(turkishLine, "Kapıyı aç.")
+
+        FakeAI.replyText = #"["افتح البوابة."]"#
+        let arabicScreen = try await arabic.translateAll([text], fallback: local)
+        XCTAssertEqual(arabicScreen, ["افتح البوابة."])
+        XCTAssertTrue(user(1).contains("into Arabic"))
+
+        let cachedArabic = try await arabic.translate(text, fallback: local)
+        let cachedTurkish = try await turkish.translateAll([text], fallback: local)
+        XCTAssertEqual(cachedArabic, "افتح البوابة.")
+        XCTAssertEqual(cachedTurkish, ["Kapıyı aç."])
+        XCTAssertEqual(FakeAI.requests.count, 2)
+    }
+
     /// #287: konuşan etiketinden öğrenilen ad, sonraki cümlede geçince istemde "çevirme" diye adıyla söylenir; görev
     /// sözcükleri ("Soldier") ve küçük harfle geçen sözcük ("ghostly") söylenmez.
     func testLearnedSpeakerNamesAreNamedInThePrompt() async throws {
@@ -1102,6 +1141,15 @@ final class AITranslationTests: XCTestCase {
     func testTestTranslatesTheSample() async {
         let result = await AITranslationCore.test(provider: .gemini, key: secret, model: nil, session: FakeAI.session())
         XCTAssertEqual(result, .success("KRATOS: [tr] We go now. [tr] Stay close, boy."))
+    }
+
+    func testGeminiKeyTestTranslatesTheSampleInArabic() async {
+        FakeAI.replyText = #"["لنذهب الآن.","ابقَ بقربي يا فتى."]"#
+        let result = await AITranslationCore.test(provider: .gemini, key: secret, model: nil,
+                                                  session: FakeAI.session(), targetLanguage: "ar")
+        XCTAssertEqual(result, .success("KRATOS: لنذهب الآن. ابقَ بقربي يا فتى."))
+        XCTAssertTrue(user(0).contains("into Arabic"))
+        XCTAssertEqual(FakeAI.requests.first?.request.value(forHTTPHeaderField: "x-goog-api-key"), secret)
     }
 
     /// Anahtar hiçbir hata metninde ya da durumda görünmez.

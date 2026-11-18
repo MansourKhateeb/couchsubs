@@ -250,6 +250,14 @@ private struct LanguageCard: View {
                 Text("French").tag("fr")
                 Text("Spanish").tag("es")
             }
+            Picker("Subtitle language", selection: $model.settings.targetLanguage) {
+                Text("Turkish").tag("tr")
+                Text("Arabic").tag("ar")
+                let target = model.settings.targetLanguage
+                if target != "tr", target != "ar" {
+                    Text(verbatim: Locale.current.localizedString(forLanguageCode: target) ?? target).tag(target)
+                }
+            }
         }
     }
 }
@@ -688,8 +696,10 @@ private struct GamePacksPage: View {
         }
         VStack(alignment: .leading, spacing: Theme.space("m")) {
             SwitchRow(title: "Use game packs", isOn: $model.settings.gamePacks)
+                .disabled(model.settings.targetLanguage != "tr")
             Divider().overlay(Color.csBorder)
             SwitchRow(title: "Send the English subtitles read to the shared pool", isOn: $model.settings.sharePool)
+                .disabled(model.settings.targetLanguage != "tr")
             HintText(text: "Only the game's English text is sent, anonymously. It is used to make better Turkish translations for everyone.")
             Divider().overlay(Color.csBorder)
             SwitchRow(title: "Ask which game I'm playing", isOn: $model.settings.askGame)
@@ -907,9 +917,11 @@ struct TranslationCard: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        let engine = model.settings.translationEngine
+        let engines = model.translationEngines
+        let preferred = model.settings.translationEngine
+        let engine = engines.contains(preferred) ? preferred : .free
         Card(title: "Translation engine") {
-            EngineTiles(engine: $model.settings.translationEngine)
+            EngineTiles(engines: engines, selected: engine) { model.settings.translationEngine = $0 }
             HintText(text: Self.explanation(engine))
             if engine != .free, model.settings.sourceLanguage != "en" {
                 HintText(text: "Online engines translate English games only. For other game languages the free translation is used.")
@@ -929,7 +941,9 @@ struct TranslationCard: View {
                 }
             case .deepL: DeepLKeySection()
             case .gemini, .openAI, .claude:
-                if let provider = engine.aiProvider { AIKeySection(provider: provider).id(provider) }
+                if let provider = engine.aiProvider {
+                    AIKeySection(provider: provider).id("\(provider.rawValue)-\(model.settings.targetLanguage)")
+                }
             case .local: LocalAISection()
             }
             // Ek talimat (#306) yalnız yapay zekâ motorlarında (Gemini, OpenAI, Claude, yerel model); DeepL'de yoktur.
@@ -1001,13 +1015,15 @@ struct TranslationCard: View {
 
 /// Çeviri motoru seçimi: altı karo (iki sıra), seçili olan sarı çerçeveli ve parlak.
 private struct EngineTiles: View {
-    @Binding var engine: TranslationEngine
+    let engines: [TranslationEngine]
+    let selected: TranslationEngine
+    let select: (TranslationEngine) -> Void
     private let columns = Array(repeating: GridItem(.flexible(), spacing: Theme.space("m"), alignment: .top), count: 3)
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: Theme.space("m")) {
-            ForEach(TranslationEngine.allCases, id: \.self) { option in
-                EngineTile(option: option, selected: option == engine) { engine = option }
+            ForEach(engines, id: \.self) { option in
+                EngineTile(option: option, selected: option == selected) { select(option) }
             }
         }
     }

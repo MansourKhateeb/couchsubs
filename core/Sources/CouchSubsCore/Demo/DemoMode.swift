@@ -11,34 +11,53 @@ public enum DemoScript {
     public struct Line: Equatable, Sendable {
         public let english: String
         public let turkish: String
+        public let arabic: String
     }
 
     /// Döngüde sırayla gösterilen altyazılar (özgün, telifsiz macera diyalogları).
     public static let lines: [Line] = [
-        Line(english: "We should reach the lighthouse before dark.", turkish: "Hava kararmadan deniz fenerine varmalıyız."),
-        Line(english: "The bridge is gone. We need another way across.", turkish: "Köprü yıkılmış. Karşıya geçmek için başka bir yol lazım."),
-        Line(english: "Stay close to me and keep your voice down.", turkish: "Yanımdan ayrılma ve sesini alçak tut."),
-        Line(english: "I found a map in the old captain's cabin.", turkish: "Yaşlı kaptanın kamarasında bir harita buldum."),
-        Line(english: "Do you hear that? Something is moving in the fog.", turkish: "Duydun mu? Siste bir şey hareket ediyor."),
-        Line(english: "Light the lantern. We can't see a thing out here.", turkish: "Feneri yak. Burada hiçbir şey göremiyoruz."),
-        Line(english: "The storm will reach the harbor within an hour.", turkish: "Fırtına bir saat içinde limana ulaşacak."),
-        Line(english: "If we take the boat, we can be there by morning.", turkish: "Tekneyi alırsak sabaha orada olabiliriz."),
-        Line(english: "Thank you for coming back for me.", turkish: "Benim için geri döndüğün için teşekkürler."),
-        Line(english: "Keep the key safe. We will need it at the gate.", turkish: "Anahtarı sakla. Kapıda ona ihtiyacımız olacak."),
-        Line(english: "Follow the river north until you see the tower.", turkish: "Kuleyi görene kadar nehri kuzeye doğru takip et."),
-        Line(english: "Rest now. Tomorrow will be a long day.", turkish: "Şimdi dinlen. Yarın uzun bir gün olacak."),
+        Line(english: "We should reach the lighthouse before dark.", turkish: "Hava kararmadan deniz fenerine varmalıyız.",
+             arabic: "علينا أن نصل إلى المنارة قبل حلول الظلام."),
+        Line(english: "The bridge is gone. We need another way across.", turkish: "Köprü yıkılmış. Karşıya geçmek için başka bir yol lazım.",
+             arabic: "انهار الجسر. نحتاج إلى طريق آخر للعبور."),
+        Line(english: "Stay close to me and keep your voice down.", turkish: "Yanımdan ayrılma ve sesini alçak tut.",
+             arabic: "ابقَ بقربي واخفض صوتك."),
+        Line(english: "I found a map in the old captain's cabin.", turkish: "Yaşlı kaptanın kamarasında bir harita buldum.",
+             arabic: "وجدت خريطة في مقصورة القبطان العجوز."),
+        Line(english: "Do you hear that? Something is moving in the fog.", turkish: "Duydun mu? Siste bir şey hareket ediyor.",
+             arabic: "هل تسمع ذلك؟ ثمة شيء يتحرك في الضباب."),
+        Line(english: "Light the lantern. We can't see a thing out here.", turkish: "Feneri yak. Burada hiçbir şey göremiyoruz.",
+             arabic: "أشعل الفانوس. لا نرى شيئًا هنا."),
+        Line(english: "The storm will reach the harbor within an hour.", turkish: "Fırtına bir saat içinde limana ulaşacak.",
+             arabic: "ستصل العاصفة إلى الميناء خلال ساعة."),
+        Line(english: "If we take the boat, we can be there by morning.", turkish: "Tekneyi alırsak sabaha orada olabiliriz.",
+             arabic: "إذا أخذنا القارب، فقد نصل بحلول الصباح."),
+        Line(english: "Thank you for coming back for me.", turkish: "Benim için geri döndüğün için teşekkürler.",
+             arabic: "شكرًا لأنك عدت من أجلي."),
+        Line(english: "Keep the key safe. We will need it at the gate.", turkish: "Anahtarı sakla. Kapıda ona ihtiyacımız olacak.",
+             arabic: "احتفظ بالمفتاح. سنحتاج إليه عند البوابة."),
+        Line(english: "Follow the river north until you see the tower.", turkish: "Kuleyi görene kadar nehri kuzeye doğru takip et.",
+             arabic: "اتبع النهر شمالًا حتى ترى البرج."),
+        Line(english: "Rest now. Tomorrow will be a long day.", turkish: "Şimdi dinlen. Yarın uzun bir gün olacak.",
+             arabic: "استرح الآن. غدًا يوم طويل."),
     ]
 
     /// Karenin sol üstündeki görev yazısı ("Ekranı çevir" ve ek alanlar bunu da çevirir).
-    public static let objective = Line(english: "Objective: Reach the lighthouse", turkish: "Görev: Deniz fenerine ulaş")
+    public static let objective = Line(english: "Objective: Reach the lighthouse", turkish: "Görev: Deniz fenerine ulaş",
+                                       arabic: "المهمة: الوصول إلى المنارة")
 
-    /// Gömülü hazır çeviri: okunan metin örnek satırlardan birine benziyorsa Türkçesi (ağ ve anahtar gerekmez).
-    public static func translation(for text: String) -> String? {
+    /// Gömülü hazır çeviri: okunan metin örnek satırlardan birine benziyorsa döner (ağ ve anahtar gerekmez).
+    public static func translation(for text: String, targetLanguage: String = "tr") -> String? {
         let wanted = TextMatch.normalize(text)
         guard !wanted.isEmpty else { return nil }
         let all = lines + [objective]
-        if let exact = all.first(where: { TextMatch.normalize($0.english) == wanted }) { return exact.turkish }
-        return all.first(where: { TextMatch.isSimilar(TextMatch.normalize($0.english), wanted, threshold: 0.8) })?.turkish
+        let line = all.first { TextMatch.normalize($0.english) == wanted }
+            ?? all.first { TextMatch.isSimilar(TextMatch.normalize($0.english), wanted, threshold: 0.8) }
+        switch targetLanguage {
+        case "ar": return line?.arabic
+        case "tr": return line?.turkish
+        default: return nil
+        }
     }
 }
 
@@ -212,9 +231,11 @@ public final class DemoFrameSource: @unchecked Sendable {
 /// deneme modu internet ve anahtar olmadan da baştan sona çalışır.
 public final class DemoTranslator: TextTranslator {
     private let base: TextTranslator?
+    private let targetLanguage: String
 
-    public init(base: TextTranslator?) {
+    public init(base: TextTranslator?, targetLanguage: String = "tr") {
         self.base = base
+        self.targetLanguage = targetLanguage
     }
 
     public func translate(_ text: String) async throws -> String {
@@ -226,12 +247,12 @@ public final class DemoTranslator: TextTranslator {
                 throw CancellationError()
             } catch {}
         }
-        return DemoScript.translation(for: text) ?? text
+        return DemoScript.translation(for: text, targetLanguage: targetLanguage) ?? text
     }
 
     public func translateAll(_ texts: [String]) async throws -> [String] {
         if let base, let results = try? await base.translateAll(texts), results.count == texts.count { return results }
-        return texts.map { DemoScript.translation(for: $0) ?? $0 }
+        return texts.map { DemoScript.translation(for: $0, targetLanguage: targetLanguage) ?? $0 }
     }
 
     public func warmUp() async { await base?.warmUp() }

@@ -11,8 +11,8 @@ extension AppServices {
     /// DeepL anahtarını dener (ayarlardaki "Kaydet ve dene").
     func checkOnlineKey(_ key: String) async -> OnlineKeyCheck { await DeepLTranslator.check(key: key) }
     /// Yapay zekâ anahtarını örnek bir satırı çevirerek dener.
-    func testAIKey(provider: AIProvider, key: String, model: String?) async -> Result<String, AIFailure> {
-        await AITranslationCore.test(provider: provider, key: key, model: model)
+    func testAIKey(provider: AIProvider, key: String, model: String?, targetLanguage: String) async -> Result<String, AIFailure> {
+        await AITranslationCore.test(provider: provider, key: key, model: model, targetLanguage: targetLanguage)
     }
     /// Yerel model sunucusunu (Ollama, LM Studio) örnek bir satırı çevirerek dener; anahtar boş olabilir.
     func testLocalAI(server: LocalAIServer, key: String) async -> Result<String, AIFailure> {
@@ -40,7 +40,7 @@ struct SamsungPreflight: Equatable {
 
 protocol AppServices: AnyObject {
     /// Yapay zekâ anahtarını örnek bir satırı çevirerek dener (varsayılanı yukarıda; testlerde sahtesi).
-    func testAIKey(provider: AIProvider, key: String, model: String?) async -> Result<String, AIFailure>
+    func testAIKey(provider: AIProvider, key: String, model: String?, targetLanguage: String) async -> Result<String, AIFailure>
     /// Yerel model sunucusunu dener (varsayılanı yukarıda; testlerde sahtesi).
     func testLocalAI(server: LocalAIServer, key: String) async -> Result<String, AIFailure>
     func discoverConsoles() async -> [ConsoleInfo]
@@ -467,7 +467,10 @@ final class AppModel: ObservableObject {
             if let data = try? JSONEncoder().encode(settings) { defaults.set(data, forKey: StoreKey.settings) }
             server.sendStyle(settings.style)
             if settings.output != oldValue.output { outputChanged() }
-            if settings.dubbing != oldValue.dubbing { dubbingSettingsChanged(from: oldValue.dubbing) }
+            let targetChanged = settings.targetLanguage != oldValue.targetLanguage
+            if targetChanged || settings.dubbing != oldValue.dubbing {
+                dubbingSettingsChanged(wasActive: oldValue.targetLanguage == "tr" && oldValue.dubbing.enabled)
+            }
             if settings.gamePacks != oldValue.gamePacks, let pipeline { connectPacks(to: pipeline) }
             pipeline?.showSpeakerNames = settings.showSpeakerNames
             if settings.appearance != oldValue.appearance { settings.appearance.apply() }
@@ -487,11 +490,14 @@ final class AppModel: ObservableObject {
                 || settings.openAIModel != oldValue.openAIModel || settings.claudeModel != oldValue.claudeModel
                 || settings.localAIBaseURL != oldValue.localAIBaseURL || settings.localAIModel != oldValue.localAIModel
                 || settings.aiInstruction != oldValue.aiInstruction
-            if translationChanged { Task { await refreshTranslatorStatus() } }
-            let languageChanged = settings.sourceLanguage != oldValue.sourceLanguage
-                || settings.targetLanguage != oldValue.targetLanguage
+            let languageChanged = targetChanged || settings.sourceLanguage != oldValue.sourceLanguage
+            if translationChanged || languageChanged { Task { await refreshTranslatorStatus() } }
             if isRunning, languageChanged || translationChanged || settings.fastSubtitleDetection != oldValue.fastSubtitleDetection {
-                if languageChanged { Task { await refreshTranslatorStatus() } }
+                if languageChanged {
+                    screenTask?.cancel()
+                    screenTask = nil
+                    hideScreen()
+                }
                 makePipeline()
             }
         }
@@ -817,6 +823,10 @@ final class AppModel: ObservableObject {
 
     /// Paketler yalnız İngilizce→Türkçede ve ayar açıkken kullanılır. Pakette olmayan İngilizce satır havuza önerilir
     /// (paketler kapalıysa da yalnız hiçbir pakette olmayanlar).
+    var gamePacksActive: Bool {
+        settings.gamePacks && settings.sourceLanguage == "en" && settings.targetLanguage == "tr"
+    }
+
     private func connectPacks(to pipeline: SubtitlePipeline) {
         let packs = self.packs
         let pool = self.pool
@@ -827,12 +837,12 @@ final class AppModel: ObservableObject {
             regionWatcher?.packLookup = nil
             return
         }
-        let active = settings.gamePacks && settings.sourceLanguage == "en" && settings.targetLanguage == "tr"
+        let active = gamePacksActive
         pipeline.packLookup = active ? { packs.match($0) } : nil
-        pipeline.packName = { packs.searchScope }
+        pipeline.packName = active ? { packs.searchScope } : nil
         // Ek alanlar da pakette aranır ama havuza önerilmez (arayüz yazıları havuzu kirletmesin).
         regionWatcher?.packLookup = pipeline.packLookup
-        guard settings.sourceLanguage == "en" else {
+        guard settings.sourceLanguage == "en", settings.targetLanguage == "tr" else {
             pipeline.onPackMiss = nil
             return
         }
@@ -1253,7 +1263,13 @@ final class AppModel: ObservableObject {
         // Oyunda henüz altyazı görülmediyse altyazı bölgesinin altına yakın tipik bir yer kullanılır.
         let region = settings.region
         let box = lastSubtitleBox ?? TextBox(left: 0.3, top: region.bottom - 0.1, right: 0.7, bottom: region.bottom - 0.03)
-        server.sendSubtitle(String(localized: "This is a test subtitle. Can you see it on top of the game?"), durationMs: 8000, box: box)
+        let text: String
+        if settings.targetLanguage == "ar" {
+            text = "LUCIA: هل تظهر الترجمة فوق اللعبة على PS5؟"
+        } else {
+            text = String(localized: "This is a test subtitle. Can you see it on top of the game?")
+        }
+        server.sendSubtitle(text, durationMs: 8000, box: box)
     }
 
     /// Kurulumu baştan başlatır (kayıtlı her şeyi siler).
@@ -1299,14 +1315,14 @@ final class AppModel: ObservableObject {
         isStarting = true
         defer { isStarting = false }
 
-        translatorStatus = await Translator.status(source: settings.sourceLanguage, target: settings.targetLanguage)
+        await refreshTranslatorStatus()
         try? await startServer()
         server.sendStyle(settings.style)
 
         makePipeline()
         sessionStartedAt = Date()
         lastMetrics = nil
-        if settings.dubbing.enabled, dubbingModelReady { makeDubber().prepare() }
+        if dubbingActive, dubbingModelReady { makeDubber().prepare() }
         SubtitleLog.write("oturum başladı: CouchSubs \(AppIdentity.version), \(settings.sourceLanguage)→\(settings.targetLanguage), "
             + "motor: \(onlineTranslationActive ? settings.onlineEngine.rawValue : "ücretsiz"), paketler: \(settings.gamePacks ? "açık" : "kapalı"), "
             + "görüntü: \(demoMode ? "deneme modu" : readsWindow ? "PS Remote Play penceresi" : "PS5")")
@@ -1458,6 +1474,7 @@ final class AppModel: ObservableObject {
         screenTask = Task { [weak self] in
             do {
                 let reading = try await Task.detached(priority: .userInitiated) { try reader.readLines(frame, deep: false) }.value
+                try Task.checkCancellation()
                 // Yapay zekâda ekranın bütün yazıları tek istekte gider (bkz. AITranslationCore.translateAll).
                 let items = try await ScreenTranslation.translate(reading, using: translator) { shown in
                     guard !Task.isCancelled else { return }
@@ -1465,11 +1482,13 @@ final class AppModel: ObservableObject {
                     server.sendScreen(shown, durationMs: milliseconds)
                     self?.screenShownUntil = Date().addingTimeInterval(Double(milliseconds) / 1000)
                 }
+                try Task.checkCancellation()
                 server.clear()
                 if items.isEmpty { server.sendSubtitle(String(localized: "No text found on the screen."), durationMs: 2500) }
             } catch is CancellationError {
                 return
             } catch let error as TranslatorError {
+                guard !Task.isCancelled else { return }
                 self?.translatorStatus = Self.translatorStatus(after: error)
                 self?.showScreenFailure(error, translator: translator)
             } catch {
@@ -1539,7 +1558,7 @@ final class AppModel: ObservableObject {
             self?.translatorStatus = Self.translatorStatus(after: error)
         }
         pipeline.onReadResult = { [weak self] error in self?.noteRead(error) }
-        pipeline.onSpeech = { [weak self] lines in self?.speak(lines) }
+        if supportsDubbing { pipeline.onSpeech = { [weak self] lines in self?.speak(lines) } }
         pipeline.onLog = { SubtitleLog.write($0) }
         onlineIssue = nil
         pipeline.warmUp()
@@ -1565,7 +1584,11 @@ final class AppModel: ObservableObject {
             translatorStatus = .ready
             return
         }
-        translatorStatus = await Translator.status(source: settings.sourceLanguage, target: settings.targetLanguage)
+        let (source, target) = (settings.sourceLanguage, settings.targetLanguage)
+        let status = await Translator.status(source: source, target: target)
+        if settings.sourceLanguage == source, settings.targetLanguage == target, !onlineTranslationActive {
+            translatorStatus = status
+        }
     }
 
     // MARK: - Çevrimiçi çeviri (DeepL ve yapay zekâ)
@@ -1573,7 +1596,7 @@ final class AppModel: ObservableObject {
     /// Deneme modunda seçili motor çeviremezse (dil paketi yok, ağ ya da anahtar yok) örnek satırların hazır çevirisi.
     private func makeTranslator() -> TextTranslator {
         let translator = makeEngineTranslator()
-        return demoMode ? DemoTranslator(base: translator) : translator
+        return demoMode ? DemoTranslator(base: translator, targetLanguage: settings.targetLanguage) : translator
     }
 
     private func makeEngineTranslator() -> TextTranslator {
@@ -1594,12 +1617,12 @@ final class AppModel: ObservableObject {
             let key = store.load(String.self, for: storeKey) ?? ""
             online = AITranslator(provider: .local, key: key, model: server.model, server: server, fallback: local,
                                   cache: Self.translationCache(engine: server.engineID, source: source, target: target), game: game,
-                                  instruction: settings.aiInstruction)
+                                  instruction: settings.aiInstruction, targetLanguage: target)
         } else if let key = store.load(String.self, for: storeKey), let provider = engine.aiProvider {
             let model = provider.model(settings.model(for: provider)).id
             online = AITranslator(provider: provider, key: key, model: model, fallback: local,
                                   cache: Self.translationCache(engine: provider.engineID(model: model), source: source, target: target),
-                                  game: game, instruction: settings.aiInstruction)
+                                  game: game, instruction: settings.aiInstruction, targetLanguage: target)
         } else if let key = store.load(String.self, for: storeKey) {
             online = DeepLTranslator(key: key, fallback: local,
                                      cache: Self.translationCache(engine: DeepLTranslator.engineID, source: source, target: target))
@@ -1621,9 +1644,18 @@ final class AppModel: ObservableObject {
         return TranslationCache.shared(in: directory, engine: engine, source: source, target: target)
     }
 
-    /// Çevrimiçi çeviri yalnız İngilizce→Türkçe için ve seçili motor hazırsa açılır.
+    var translationEngines: [TranslationEngine] {
+        switch settings.targetLanguage {
+        case "tr": TranslationEngine.allCases
+        case "ar": [.free, .gemini]
+        default: [.free]
+        }
+    }
+
+    /// Çevrimiçi çeviri İngilizce oyunlarda, hedefi destekleyen motor hazırsa açılır.
     var onlineTranslationActive: Bool {
-        settings.onlineTranslation && settings.sourceLanguage == "en" && settings.targetLanguage == "tr" && isReady(settings.onlineEngine)
+        settings.onlineTranslation && settings.sourceLanguage == "en"
+            && translationEngines.contains(settings.onlineEngine) && isReady(settings.onlineEngine)
     }
 
     /// Motor kullanılabilir mi: bulut motorlarında anahtar kayıtlıdır; yerel modelde anahtar gerekmez, adres ve model adı
@@ -1660,7 +1692,8 @@ final class AppModel: ObservableObject {
     /// da) Anahtarlık'a yazılır ve bu motor seçilir.
     func setAIKey(_ key: String, for provider: AIProvider) async -> Result<String, AIFailure> {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        let result = await services.testAIKey(provider: provider, key: key, model: settings.model(for: provider))
+        let result = await services.testAIKey(provider: provider, key: key, model: settings.model(for: provider),
+                                              targetLanguage: settings.targetLanguage)
         switch result {
         case .success, .failure(.quotaExceeded), .failure(.modelRejected), .failure(.busy): saveKey(key, for: TranslationEngine(provider))
         case .failure: break
@@ -1673,7 +1706,8 @@ final class AppModel: ObservableObject {
         guard let storeKey = TranslationEngine(provider).storeKey, let key = store.load(String.self, for: storeKey) else {
             return .failure(.invalidKey)
         }
-        return await services.testAIKey(provider: provider, key: key, model: settings.model(for: provider))
+        return await services.testAIKey(provider: provider, key: key, model: settings.model(for: provider),
+                                        targetLanguage: settings.targetLanguage)
     }
 
     /// Ayarlardaki "Bağlantıyı dene": yerel model sunucusuna örnek satırı gönderir. `key` yazıldıysa o, yoksa kayıtlı
@@ -1976,6 +2010,9 @@ final class AppModel: ObservableObject {
 // MARK: - Dublaj
 
 extension AppModel {
+    var supportsDubbing: Bool { settings.targetLanguage == "tr" }
+    var dubbingActive: Bool { supportsDubbing && settings.dubbing.enabled }
+
     @discardableResult
     private func makeDubber() -> Dubber {
         if let dubber {
@@ -1990,13 +2027,19 @@ extension AppModel {
     }
 
     private func speak(_ lines: [SpokenLine]) {
-        guard settings.dubbing.enabled, dubbingModelReady else { return }
+        guard dubbingActive, dubbingModelReady else { return }
         makeDubber().speak(lines)
     }
 
-    private func dubbingSettingsChanged(from old: DubbingSettings) {
+    private func dubbingSettingsChanged(wasActive: Bool) {
         guard let dubber else {
-            if settings.dubbing.enabled, !old.enabled, isRunning, dubbingModelReady { makeDubber().prepare() }
+            if dubbingActive, !wasActive, isRunning, dubbingModelReady { makeDubber().prepare() }
+            return
+        }
+        if !dubbingActive {
+            dubber.stop()
+            self.dubber = nil
+            Task { await dubber.shutdown() }
             return
         }
         dubber.cast = settings.dubbing.cast
@@ -2004,21 +2047,17 @@ extension AppModel {
             dubber.stop()
             dubber.output = settings.dubbing.output
         }
-        if !settings.dubbing.enabled {
-            self.dubber = nil
-            Task { await dubber.shutdown() }
-        }
     }
 
     /// Ses modelini indirir (ilk kullanımda bir kez, ~440 MB).
     func downloadDubbingModel() async {
-        guard dubbingDownload == nil else { return }
+        guard supportsDubbing, dubbingDownload == nil else { return }
         dubbingDownload = 0
         dubbingError = nil
         do {
             try await DubbingModelStore.download { [weak self] progress in self?.dubbingDownload = progress }
             dubbingModelReady = true
-            if settings.dubbing.enabled, isRunning { makeDubber().prepare() }
+            if dubbingActive, isRunning { makeDubber().prepare() }
         } catch {
             dubbingError = error.localizedDescription
         }
@@ -2027,9 +2066,10 @@ extension AppModel {
 
     /// Ayarlardaki "Dinle": sesi seçilen çıkıştan çalar.
     func previewVoice(_ voice: DubbingVoice) async {
-        guard dubbingModelReady else { return }
+        guard supportsDubbing, dubbingModelReady else { return }
         dubbingError = nil
         try? await startServer()
+        guard supportsDubbing else { return }
         makeDubber().preview(voice)
     }
 

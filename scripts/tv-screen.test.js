@@ -18,7 +18,10 @@ const browser = [process.env.COUCHSUBS_TEST_BROWSER, process.env.CHROME_BIN,
 const item = (text, left, top, right, bottom, line = .03) => ({ text, box: { left, top, right, bottom }, line });
 const upper = item('Bu bölgedeki bütün gizli belgeleri bul ve güvenli bölgeye geri dön.', .10, .20, .28, .23);
 const lower = item('Görevler', .10, .26, .28, .28, .02);
+const mixedSubtitle = 'LUCIA: هل تظهر الترجمة فوق اللعبة على PS5؟';
+const longArabic = 'اذهب إلى الميناء قبل شروق الشمس، ثم ابحث عن الخريطة في القارب القديم قرب البوابة.';
 const scenarios = {
+  arabic: [Object.assign(item('المهمة: ابحث عن الخريطة\nثم عُد إلى الميناء.', .1, .1, .45, .4), {paragraphs:true})],
   neighbours: [upper, lower],
   tight: [upper, item('Görevler', .10, .24, .28, .26, .02)],
   reversed: [lower, upper],
@@ -39,14 +42,18 @@ function render(width, height) {
   const end = app.indexOf('\n  //', app.indexOf('  function hideScreen()', start));
   const validStart = app.indexOf('  function validBox(box)');
   const validEnd = app.indexOf('\n  //', validStart);
+  const lineStart = app.indexOf('  var WRAP_MAX_CHARS');
+  const lineEnd = app.indexOf('  function rawText', lineStart);
   assert.ok(start > 0 && end > start && validStart > 0 && validEnd > validStart, 'TV işlevleri bulunamadı');
+  assert.ok(lineStart > 0 && lineEnd > lineStart, 'Subtitle renderer not found');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'couchsubs-screen-test-'));
   try {
     const html = `<!doctype html><meta charset="utf-8"><style>${fs.readFileSync(path.join(root, 'style.css'), 'utf8')}</style>
-      <div id="screen"></div><pre id="result"></pre><script>
+      <div id="screen"></div><div id="subtitle"><span id="subtitle-text"></span></div><pre id="result"></pre><script>
       function $(id) { return document.getElementById(id); }
       var hidden = []; function hideSubtitle(reason) { hidden.push(reason); }
       ${app.slice(validStart, validEnd)}
+      ${app.slice(lineStart, lineEnd)}
       ${app.slice(start, end)}
       var result = {};
       var scenarios = ${JSON.stringify(scenarios)};
@@ -56,9 +63,32 @@ function render(width, height) {
           var b = el.getBoundingClientRect();
           return {text: el.textContent, left:b.left, right:b.right, top:b.top, bottom:b.bottom,
             width:b.width, height:b.height, font:parseFloat(getComputedStyle(el).fontSize),
-            clientHeight:el.clientHeight, scrollHeight:el.scrollHeight, align:getComputedStyle(el).textAlign};
+            clientHeight:el.clientHeight, scrollHeight:el.scrollHeight,
+            align:getComputedStyle(el).textAlign, direction:getComputedStyle(el).direction};
         });
       }
+      function left(node, index) {
+        var range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + 1);
+        return range.getBoundingClientRect().left;
+      }
+      setLineText('subtitle-text', ${JSON.stringify(mixedSubtitle)}, false, 46);
+      var subtitle = $('subtitle-text');
+      var label = subtitle.querySelector('bdi');
+      var body = label.nextSibling;
+      var style = getComputedStyle(subtitle);
+      var ps5 = body.textContent.indexOf('PS5');
+      result.mixed = {
+        text: subtitle.textContent, lang: subtitle.lang, direction: style.direction, align: style.textAlign,
+        font: style.fontFamily, label: label.textContent, labelDirection: getComputedStyle(label).direction,
+        firstLetter: left(label.firstChild, 0), colon: left(label.firstChild, 5),
+        firstArabic: left(body, 1), ps: left(body, ps5), five: left(body, ps5 + 2), questionMark: left(body, ps5 + 3)
+      };
+      setLineText('subtitle-text', ${JSON.stringify(longArabic)}, false, 46);
+      result.wrapped = {text: subtitle.textContent, direction: getComputedStyle(subtitle).direction};
+      setLineText('subtitle-text', 'Sonraki satır.', false, 46);
+      result.turkish = {text: subtitle.textContent, dir: subtitle.dir, lang: subtitle.lang, labels: subtitle.querySelectorAll('bdi').length};
       hideScreen(); result.hidden = $('screen').className; result.count = $('screen').children.length;
       result.viewport = {width:innerWidth,height:innerHeight}; result.hideReasons = hidden;
       $('result').textContent = btoa(unescape(encodeURIComponent(JSON.stringify(result))));
@@ -125,6 +155,27 @@ test('TV ekran çevirisi: ' + width + '×' + height, {skip: !browser && 'Chrome/
     assert.equal(r.paragraph[0].text, scenarios.paragraph[0].text);
     assert.ok(r.paragraph[0].scrollHeight <= r.paragraph[0].clientHeight + 1);
     assert.ok(r.paragraph[0].bottom < r.paragraph[1].top);
+  });
+  await t.test('Arabic subtitles render right-to-left with Latin names, digits and Arabic punctuation', () => {
+    assert.equal(r.mixed.text, mixedSubtitle);
+    assert.equal(r.mixed.lang, 'ar');
+    assert.equal(r.mixed.direction, 'rtl');
+    assert.equal(r.mixed.align, 'center');
+    assert.match(r.mixed.font, /Noto Sans Arabic.*Tahoma.*LG Smart UI/);
+    assert.equal(r.mixed.label, 'LUCIA:');
+    assert.equal(r.mixed.labelDirection, 'ltr');
+    assert.ok(r.mixed.colon > r.mixed.firstLetter && r.mixed.firstLetter > r.mixed.firstArabic);
+    assert.ok(r.mixed.questionMark < r.mixed.ps && r.mixed.ps < r.mixed.five);
+  });
+  await t.test('Arabic wrapping and paragraph alignment keep the text and allow switching back to Turkish', () => {
+    assert.equal(r.wrapped.direction, 'rtl');
+    const wrappedLines = r.wrapped.text.split('\n');
+    assert.ok(wrappedLines.length > 1 && wrappedLines.length <= 3);
+    assert.equal(wrappedLines.join(' '), longArabic);
+    assert.equal(r.arabic[0].text, scenarios.arabic[0].text);
+    assert.equal(r.arabic[0].direction, 'rtl');
+    assert.equal(r.arabic[0].align, 'right');
+    assert.deepEqual(r.turkish, {text: 'Sonraki satır.', dir: 'ltr', lang: '', labels: 0});
   });
   await t.test('sığması imkânsız metin kesilmez ve 14 px altına inmez', () => {
     assert.equal(r.dense.length, 2);

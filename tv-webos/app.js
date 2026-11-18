@@ -5,11 +5,11 @@
 (function () {
   'use strict';
 
-  // TV uygulamasının sürümü: appinfo.json, tv-tizen/config.xml ve tv-android/app/build.gradle ile aynı tutulur.
-  var APP_VERSION = '0.9.24';
   var t = window.t;
   var config = window.COUCHSUBS_CONFIG || {};
   var platform = window.COUCHSUBS_PLATFORM;
+  // Tizen ve Android TV'nin ortak sürümü; webOS kendi paket sürümünü bildirir.
+  var APP_VERSION = platform.appVersion || '0.9.24';
   var KEY = { RED: 403, GREEN: 404, BLUE: 406, LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, OK: 13, BACK: platform.backKey };
 
   var server = null;
@@ -371,12 +371,39 @@
     return { text: wrapBalance(words, Math.min(lines, words.length)), scale: scale };
   }
 
+  // A subtitle can start with a Latin speaker name. Set its base direction from the Arabic text and
+  // isolate the name together with its colon so the browser keeps both in the right order.
+  function setTranslationText(el, text) {
+    var arabic = /[\u0620-\u063f\u0641-\u064a\u066e-\u066f\u0671-\u06d3\u06d5\u0750-\u077f\u08a0-\u08c9\ufb50-\ufdff\ufe70-\ufefc]/.test(text);
+    el.dir = arabic ? 'rtl' : 'ltr';
+    el.lang = arabic ? 'ar' : '';
+    var speaker = /^[A-Z\u00c0-\u024f][A-Za-z0-9\u00c0-\u024f.'’-]*(?: [A-Z0-9\u00c0-\u024f][A-Za-z0-9\u00c0-\u024f.'’-]*){0,2} ?[:\uFF1A](?=\s|$)/m;
+    if (!arabic || !speaker.test(text)) {
+      el.textContent = text;
+      return;
+    }
+    el.textContent = '';
+    text.split('\n').forEach(function (line, index) {
+      if (index) el.appendChild(document.createTextNode('\n'));
+      var match = speaker.exec(line);
+      if (match) {
+        var label = document.createElement('bdi');
+        label.dir = 'ltr';
+        label.textContent = match[0];
+        el.appendChild(label);
+        line = line.slice(match[0].length);
+      }
+      el.appendChild(document.createTextNode(line));
+    });
+  }
+
   // Satırı yazar. Sayfadaki metin bölünmüş hâlidir; karşılaştırmalar için özgün metin elementte kalır.
   function setLineText(textId, text, paragraphs, baseSize) {
     var el = $(textId);
     var wrapped = paragraphs ? { text: text, scale: 1 } : wrapSubtitle(text);
     el.rawText = text;
-    el.textContent = wrapped.text;
+    setTranslationText(el, wrapped.text);
+    el.style.textAlign = paragraphs ? (el.dir === 'rtl' ? 'right' : 'left') : '';
     el.style.whiteSpace = 'pre-line';
     el.style.fontSize = Math.round(baseSize * wrapped.scale) + 'px';
   }
@@ -406,7 +433,6 @@
     holdUntil = shownAt + Math.min(HOLD_MAX_MS, 2000 + text.length * 60);
     currentBox = validBox(box);
     setLineText('subtitle-text', text, paragraphs, fontBase);
-    $('subtitle-text').style.textAlign = paragraphs ? 'left' : '';
     $('subtitle').className = '';
     layout();
     setStatus('st-last', text.length > 40 ? text.slice(0, 40) + '…' : text);
@@ -507,7 +533,7 @@
   }
 
   function plainText(text) {
-    return String(text).toLowerCase().replace(/[.,!?;:…"'“”‘’«»()\[\]\-–—]+/g, '').replace(/\s+/g, ' ').trim();
+    return String(text).toLowerCase().replace(/[.,!?;:،؛؟…"'“”‘’«»()\[\]\-–—]+/g, '').replace(/\s+/g, ' ').trim();
   }
 
   // --- Ekranı çevir ---
@@ -548,7 +574,7 @@
       if (!box || !item.text) continue;
       var el = document.createElement('div');
       el.className = item.paragraphs === true ? 'item paragraphs' : 'item';
-      el.textContent = item.text;
+      setTranslationText(el, item.text);
       var left = Math.max(0, box.left - SCREEN_PAD);
       var top = Math.max(0, box.top - SCREEN_PAD);
       var boxHeight = (box.bottom - box.top + 2 * SCREEN_PAD) * height;
@@ -608,7 +634,7 @@
     $('regions').className = '';
     var width = window.innerWidth || 1920;
     var height = window.innerHeight || 1080;
-    el.textContent = data.text;
+    setTranslationText(el, data.text);
     el.style.left = el.style.right = el.style.top = el.style.bottom = '';
     if ((box.left + box.right) / 2 > 0.5) {
       el.style.right = (Math.max(0, 1 - box.right - REGION_PAD) * 100) + '%';

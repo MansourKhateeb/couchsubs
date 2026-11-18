@@ -274,6 +274,15 @@ public enum AIRequest {
         Reply with only the translation, no explanations, notes or quotes.
         """
 
+    private static let arabicSystemPrompt = """
+        Translate English video game subtitles into natural, concise Modern Standard Arabic for on-screen dialogue. \
+        Use short, idiomatic phrases that people would say, and preserve the original meaning, tone and level of formality. \
+        Keep character names, place names, speaker labels (such as "ATREUS:") and game identifiers exactly as written. \
+        Preserve line breaks and use Arabic punctuation where appropriate (، ؛ ؟). \
+        Correct obvious OCR mistakes from context and render continuations naturally. \
+        Reply with the translations in the requested format, without explanations or extra quotes.
+        """
+
     /// Kullanıcının ek talimatında en çok bu kadar karakter gider (fazlası kesilir).
     public static let maxInstructionLength = 1000
 
@@ -288,8 +297,10 @@ public enum AIRequest {
 
     /// Sistem talimatı: kullanıcının ek talimatı varsa sona eklenir (#306; ör. küfrü yumuşatmadan çevir). Boşsa
     /// `systemPrompt` olduğu gibi gider.
-    public static func systemPromptWith(_ instruction: String?) -> String {
+    public static func systemPromptWith(_ instruction: String?, targetLanguage: String = "tr") -> String {
+        let systemPrompt = targetLanguage == "ar" ? arabicSystemPrompt : Self.systemPrompt
         guard let extra = self.instruction(instruction) else { return systemPrompt }
+        if targetLanguage == "ar" { return systemPrompt + "\n\n" + extra + "\n\nKeep Arabic as the output language." }
         return systemPrompt + "\n\n" + extra
     }
 
@@ -303,7 +314,8 @@ public enum AIRequest {
     /// Kullanıcı iletisi: önceki satırlar (yalnız bağlam) ve çevrilecek cümleler. `names`: konuşan etiketlerinden
     /// öğrenilip cümlelerde geçen adlar; model "Price"ı "Fiyat" diye çevirmesin diye adıyla söylenir (#287).
     public static func userMessage(sentences: [String], context: [AIContextLine], game: String? = nil,
-                                   names: [String] = []) -> String {
+                                   names: [String] = [], targetLanguage: String = "tr") -> String {
+        let language = targetLanguage == "ar" ? "Arabic" : "Turkish"
         var parts: [String] = []
         if let game, !game.isEmpty { parts.append("Game: \(game)") }
         if !names.isEmpty {
@@ -313,14 +325,14 @@ public enum AIRequest {
             var lines = ["Previous subtitles, for context only (do not translate them again):"]
             for line in context {
                 lines.append("English: \(line.source)")
-                if let translation = line.translation { lines.append("Turkish: \(translation)") }
+                if let translation = line.translation { lines.append("\(language): \(translation)") }
             }
             parts.append(lines.joined(separator: "\n"))
         }
         let list = (try? JSONSerialization.data(withJSONObject: sentences, options: [.withoutEscapingSlashes]))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        parts.append("Translate each string in this JSON array into Turkish. Reply with only a JSON array of \(sentences.count) "
-            + "Turkish strings in the same order.\n\(list)")
+        parts.append("Translate each string in this JSON array into \(language). Reply with only a JSON array of \(sentences.count) "
+            + "\(language) strings in the same order.\n\(list)")
         return parts.joined(separator: "\n\n")
     }
 
@@ -337,10 +349,10 @@ public enum AIRequest {
     public static func make(provider: AIProvider, key: String, model: AIModel, sentences: [String],
                             context: [AIContextLine], game: String? = nil, server: LocalAIServer? = nil,
                             maxOutputTokens: Int = AIRequest.maxOutputTokens, thinkingOff: Bool = true,
-                            names: [String] = [], instruction: String? = nil) -> URLRequest {
+                            names: [String] = [], instruction: String? = nil, targetLanguage: String = "tr") -> URLRequest {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        let user = userMessage(sentences: sentences, context: context, game: game, names: names)
-        let system = systemPromptWith(instruction)
+        let user = userMessage(sentences: sentences, context: context, game: game, names: names, targetLanguage: targetLanguage)
+        let system = systemPromptWith(instruction, targetLanguage: targetLanguage)
         var request: URLRequest
         var body: [String: Any]
         switch provider {
@@ -587,6 +599,7 @@ public final class AITranslationCore: @unchecked Sendable {
     /// Yerel modelin sunucusu; bulut hizmetlerinde nil.
     public let server: LocalAIServer?
     private let key: String
+    private let targetLanguage: String
     private let session: URLSession
     /// "Ekranı çevir"in uzun yanıtlı tek isteği için daha uzun bekleyen oturum.
     private let screenSession: URLSession
@@ -625,8 +638,9 @@ public final class AITranslationCore: @unchecked Sendable {
     /// `instruction`: Ayarlardaki "Ek talimat"; sistem talimatının sonuna eklenir, boşsa hiçbir şey değişmez.
     public init(provider: AIProvider, key: String, model: String? = nil, server: LocalAIServer? = nil, session: URLSession? = nil,
                 cache: TranslationCache = TranslationCache(), budget: RequestBudget? = nil, game: (@Sendable () -> String?)? = nil,
-                instruction: String? = nil) {
+                instruction: String? = nil, targetLanguage: String = "tr") {
         self.provider = provider
+        self.targetLanguage = targetLanguage
         errorPause = provider.isLocal ? Self.localRetryAfter : Self.retryAfter
         self.game = game
         self.instruction = AIRequest.instruction(instruction)
@@ -792,7 +806,7 @@ public final class AITranslationCore: @unchecked Sendable {
                 let translated = try await perform(count: sentences.count, session: screenSession) { thinkingOff in
                     AIRequest.make(provider: provider, key: key, model: model, sentences: sentences, context: [], game: game,
                                    server: server, maxOutputTokens: AIRequest.screenOutputTokens, thinkingOff: thinkingOff,
-                                   instruction: instruction)
+                                   instruction: instruction, targetLanguage: targetLanguage)
                 }
                 setFailure(nil)
                 for (index, translation) in zip(chunk, translated) {
@@ -840,8 +854,10 @@ public final class AITranslationCore: @unchecked Sendable {
     private func cacheKey(_ text: String, game: String?) -> String {
         var key = text
         if let game, !game.isEmpty { key = game + "\u{001f}" + text }
-        guard let instructionTag else { return key }
-        return "i:" + instructionTag + "\u{001f}" + key
+        if let instructionTag { key = "i:" + instructionTag + "\u{001f}" + key }
+        // Preserve existing Turkish cache entries, including when callers share a cache across targets.
+        if targetLanguage != "tr" { key = "l:" + targetLanguage + "\u{001f}" + key }
+        return key
     }
 
     private func contextBeforeShowing(_ text: String, game: String?) -> [AIContextLine] {
@@ -880,7 +896,8 @@ public final class AITranslationCore: @unchecked Sendable {
     private func request(_ sentences: [String], context: [AIContextLine], game: String?, names: [String]) async throws -> [String] {
         try await perform(count: sentences.count, session: session) { thinkingOff in
             AIRequest.make(provider: provider, key: key, model: model, sentences: sentences, context: context, game: game,
-                           server: server, thinkingOff: thinkingOff, names: names, instruction: instruction)
+                           server: server, thinkingOff: thinkingOff, names: names, instruction: instruction,
+                           targetLanguage: targetLanguage)
         }
     }
 
@@ -927,13 +944,14 @@ public final class AITranslationCore: @unchecked Sendable {
     /// Ayarlardaki "Dene" ve "Bağlantıyı dene": örnek bir satırı çevirir; çeviri ya da hatanın türü döner. Yerel modelde
     /// anahtar isteğe bağlıdır ve model belleğe yüklenirken uzun beklenir.
     public static func test(provider: AIProvider, key: String, model: String?, server: LocalAIServer? = nil,
-                            sample: String = AITranslationCore.sample, session: URLSession? = nil) async -> Result<String, AIFailure> {
+                            sample: String = AITranslationCore.sample, session: URLSession? = nil,
+                            targetLanguage: String = "tr") async -> Result<String, AIFailure> {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty || provider.isLocal else { return .failure(.invalidKey) }
         let session = session ?? makeSession(timeout: provider.isLocal ? localTestTimeout : timeout)
         // Deneme tek istektir; çeviri hattının dakikalık hakkından yemez.
         let translator = AITranslationCore(provider: provider, key: key, model: model, server: server, session: session,
-                                           budget: RequestBudget(perMinute: .max))
+                                           budget: RequestBudget(perMinute: .max), targetLanguage: targetLanguage)
         do {
             let result = try await translator.translate(sample) { _ in
                 // Dakikalık sınıra takıldıysa anahtar geçerlidir, hizmet şu an yoğundur (bakiye bitmedi).

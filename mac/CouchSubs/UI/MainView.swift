@@ -267,8 +267,7 @@ private struct PackInUseTile: View {
     @EnvironmentObject private var model: AppModel
 
     private var active: Bool {
-        model.settings.gamePacks && model.settings.sourceLanguage == "en" && model.settings.targetLanguage == "tr"
-            && !model.installedPacks.isEmpty
+        model.gamePacksActive && !model.installedPacks.isEmpty
     }
 
     var body: some View {

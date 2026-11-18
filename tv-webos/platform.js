@@ -5,6 +5,7 @@
 
   window.COUCHSUBS_PLATFORM = {
     backKey: 461,
+    appVersion: '0.9.25', // tv-webos/appinfo.json
 
     // HDMI görüntüsü gelmezse app.js nedenini ve giriş seçimini gösterir (Android TV bunu kendi ekranında yapar).
     noPictureHelp: true,

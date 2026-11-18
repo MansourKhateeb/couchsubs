@@ -10,9 +10,14 @@ struct DubbingCard: View {
     var body: some View {
         Card(title: "Turkish dubbing") {
             SwitchRow(title: "Voice the translation in Turkish", isOn: $model.settings.dubbing.enabled)
-            HintText(text: "In the game's audio settings, turn the dialogue (voice) volume down; keep music and effects. If the game can show speaker names in subtitles, turn them on: every character then speaks with its own voice.")
+                .disabled(!model.supportsDubbing)
+            if model.supportsDubbing {
+                HintText(text: "In the game's audio settings, turn the dialogue (voice) volume down; keep music and effects. If the game can show speaker names in subtitles, turn them on: every character then speaks with its own voice.")
+            } else {
+                HintText(text: "Dubbing is available for Turkish subtitles.")
+            }
 
-            if model.settings.dubbing.enabled {
+            if model.dubbingActive {
                 if let progress = model.dubbingDownload {
                     ProgressView(value: progress) {
                         Text("Downloading voices… \(Int(progress * 100))%")

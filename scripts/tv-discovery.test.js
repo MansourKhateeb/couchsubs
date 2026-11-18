@@ -237,6 +237,25 @@ test('kayıtlı adres çalışıyorsa tarama yapılmaz ve kayıt değişmez', ()
   assert.strictEqual(tv.saved(), 'http://192.168.1.109:8787');
 });
 
+test('Arabic subtitle events keep RTL in previous rows when switching back to Turkish', () => {
+  const address = 'http://192.168.1.109:8787';
+  const tv = startTv({ saved: address, alive: new Set([address]), hasLocalAddress: false });
+  tv.clock.advance(100);
+  const arabic = 'هل فتحت البوابة؟';
+  tv.emit('subtitle', { text: arabic, duration: 5000 });
+  assert.strictEqual(tv.element('subtitle-text').dir, 'rtl');
+  assert.strictEqual(tv.element('subtitle-text').textContent, arabic);
+  tv.emit('subtitle', { text: 'أحضر الخريطة من القارب.', duration: 5000 });
+  tv.emit('subtitle', { text: 'Kapıyı aç.', duration: 5000 });
+  assert.strictEqual(tv.element('subtitle-text').dir, 'ltr');
+  assert.strictEqual(tv.element('subtitle-prev-text').dir, 'rtl');
+  assert.strictEqual(tv.element('subtitle-prev2-text').dir, 'rtl');
+  assert.strictEqual(tv.element('subtitle-prev2-text').textContent, arabic);
+
+  tv.emit('region', { id: 'q', text: 'ابحث عن الخريطة.', box: { left: 0.7, top: 0.05, right: 0.95, bottom: 0.1 } });
+  assert.strictEqual(tv.element('regions').children[0].dir, 'rtl');
+});
+
 // Ek alanlar: bilgisayar köşedeki yazıların (görev, telefon) çevirisini "region" olayıyla gönderir.
 test('ek alanın çevirisi kendi yerinde küçük kutuda görünür, boş metin ve region-clear kaldırır', () => {
   const tv = startTv({ saved: 'http://192.168.1.109:8787', alive: new Set(['http://192.168.1.109:8787']), hasLocalAddress: false });

@@ -38,9 +38,9 @@ final class FakeServices: AppServices {
 
     /// "Kaydet ve dene"nin sonucu; gerçek hizmete gidilmez.
     var aiResult: Result<String, AIFailure> = .success("KRATOS: Gidiyoruz.")
-    var aiTests: [(provider: AIProvider, key: String, model: String?)] = []
-    func testAIKey(provider: AIProvider, key: String, model: String?) async -> Result<String, AIFailure> {
-        aiTests.append((provider, key, model))
+    var aiTests: [(provider: AIProvider, key: String, model: String?, targetLanguage: String)] = []
+    func testAIKey(provider: AIProvider, key: String, model: String?, targetLanguage: String) async -> Result<String, AIFailure> {
+        aiTests.append((provider, key, model, targetLanguage))
         return aiResult
     }
     /// "Bağlantıyı dene"nin sonucu; yerel sunucuya gidilmez.
@@ -587,6 +587,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(services.aiTests.first?.key, "AIza-free")
         // Ücretsiz katmandaki varsayılan model denenir.
         XCTAssertEqual(services.aiTests.first?.model, AIProvider.gemini.defaultModel.id)
+        XCTAssertEqual(services.aiTests.first?.targetLanguage, "tr")
         XCTAssertTrue(AIProvider.gemini.defaultModel.freeTier)
         XCTAssertEqual(store.load(String.self, for: StoreKey.geminiKey), "AIza-free")
         XCTAssertEqual(model.settings.translationEngine, .gemini)
@@ -809,12 +810,96 @@ final class AppModelRunTests: XCTestCase {
     }
 
     func testChangingLanguageWhileRunningRebuildsPipeline() async {
-        let model = readyModel(FakeServices())
+        let services = FakeServices()
+        let model = readyModel(services)
         await model.start()
         defer { model.stop() }
         XCTAssertEqual(model.activeLanguages?.source, "en")
+        XCTAssertEqual(model.activeLanguages?.target, "tr")
+        model.settings.targetLanguage = "ar"
+        XCTAssertEqual(model.activeLanguages?.target, "ar")
+        model.settings.targetLanguage = "tr"
+        XCTAssertEqual(model.activeLanguages?.target, "tr")
         model.settings.sourceLanguage = "ja"
         XCTAssertEqual(model.activeLanguages?.source, "ja")
+        XCTAssertEqual(services.streams.count, 1)
+        XCTAssertEqual(services.keepers.count, 1)
+    }
+
+    func testArabicKeepsExistingPairingsAndTurkishPreferences() async throws {
+        let services = FakeServices()
+        let store = MemoryStore()
+        let defaults = UserDefaults.isolated()
+        let account = Data(repeating: 1, count: 8)
+        let console = RegisteredConsole(host: "192.168.1.253", name: "PS5", registKey: Data(repeating: 0x31, count: 16),
+                                        morning: Data(repeating: 2, count: 16))
+        let tv = LGTV(name: "LG TV", host: "127.0.0.1")
+        store.save(account, for: StoreKey.accountId)
+        store.save(console, for: StoreKey.console)
+        store.save(tv, for: StoreKey.tv)
+        store.save("tv-key", for: StoreKey.tvKey)
+        store.save("dev-key", for: StoreKey.tvDevKey)
+        store.save("gemini-key", for: StoreKey.geminiKey)
+        store.save("deepl-key", for: StoreKey.deepLKey)
+        store.save(true, for: StoreKey.setupComplete)
+        defaults.set(Data(#"{"onlineTranslation":true}"#.utf8), forKey: StoreKey.settings)
+        let saved = store.values
+
+        let model = AppModel(services: services, store: store, defaults: defaults)
+        XCTAssertEqual(model.settings.targetLanguage, "tr")
+        XCTAssertTrue(model.onlineTranslationActive)
+        model.settings.dubbing.enabled = true
+        XCTAssertTrue(model.gamePacksActive)
+        XCTAssertTrue(model.dubbingActive)
+
+        model.settings.targetLanguage = "ar"
+        XCTAssertEqual(model.settings.translationEngine, .deepL)
+        XCTAssertEqual(model.translationEngines, [.free, .gemini])
+        XCTAssertFalse(model.onlineTranslationActive)
+        XCTAssertFalse(model.gamePacksActive)
+        XCTAssertFalse(model.dubbingActive)
+        XCTAssertTrue(model.settings.gamePacks)
+        XCTAssertTrue(model.settings.dubbing.enabled)
+        XCTAssertEqual(store.values, saved)
+
+        let reopened = AppModel(services: services, store: store, defaults: defaults)
+        XCTAssertEqual(reopened.settings.targetLanguage, "ar")
+        XCTAssertEqual(reopened.accountId, account)
+        XCTAssertEqual(reopened.console?.host, console.host)
+        XCTAssertEqual(reopened.tv?.host, tv.host)
+        reopened.chooseFreeGemini()
+        XCTAssertTrue(reopened.onlineTranslationActive)
+        services.aiResult = .success("لنذهب الآن.")
+        let result = await reopened.testAIKey(for: .gemini)
+        XCTAssertEqual(result, .success("لنذهب الآن."))
+        XCTAssertEqual(services.aiTests.last?.targetLanguage, "ar")
+        XCTAssertEqual(services.aiTests.last?.key, "gemini-key")
+
+        reopened.settings.targetLanguage = "tr"
+        XCTAssertTrue(reopened.onlineTranslationActive)
+        XCTAssertTrue(reopened.gamePacksActive)
+        XCTAssertTrue(reopened.dubbingActive)
+        XCTAssertEqual(store.values, saved)
+    }
+
+    func testArabicTVTestSubtitleUsesTheSelectedLanguage() async throws {
+        let model = readyModel(FakeServices())
+        await model.start()
+        defer { model.stop() }
+        model.settings.targetLanguage = "ar"
+        let url = try XCTUnwrap(URL(string: "http://127.0.0.1:\(model.serverPort)/events"))
+        let (bytes, _) = try await URLSession.shared.bytes(from: url)
+        model.sendTestSubtitle()
+        let expected = "LUCIA: هل تظهر الترجمة فوق اللعبة على PS5؟"
+        var subtitle: String?
+        for try await line in bytes.lines {
+            if line == "event: ping" { break }
+            if line.hasPrefix("data: "), line.contains(expected) {
+                subtitle = line
+                break
+            }
+        }
+        XCTAssertNotNil(subtitle)
     }
 
     /// Çeviri başlamamışken bağlı olmamak bir uyarı değildir; nokta gri kalır.

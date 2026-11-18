@@ -83,6 +83,14 @@ final class DemoModeTests: XCTestCase {
         XCTAssertEqual(screen, [DemoScript.objective.turkish])
     }
 
+    func testArabicDemoFallsBackToArabicWithoutAnEngine() async throws {
+        let translator = DemoTranslator(base: MissingModelTranslator(), targetLanguage: "ar")
+        let line = try await translator.translate(DemoScript.lines[0].english)
+        let screen = try await translator.translateAll([DemoScript.objective.english])
+        XCTAssertEqual(line, "علينا أن نصل إلى المنارة قبل حلول الظلام.")
+        XCTAssertEqual(screen, ["المهمة: الوصول إلى المنارة"])
+    }
+
     /// Deneme karesi gerçek hattan geçer: okunan satır çevrilip TV/telefona gider (dil paketi olmasa da).
     func testPipelineTranslatesAndShowsADemoLine() async throws {
         var time = 0

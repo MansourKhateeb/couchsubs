@@ -12,6 +12,10 @@ html, body {
   font-family: "LG Smart UI", "Museo Sans", "SamsungOne", "Tizen Sans", Roboto, Arial, sans-serif;
 }
 
+[lang="ar"] {
+  font-family: "Noto Sans Arabic", Tahoma, "LG Smart UI", Arial, sans-serif;
+}
+
 #video-host, #video-host video {
   position: absolute;
   top: 0;
@@ -95,6 +99,10 @@ html, body {
   white-space: pre-line;
   text-shadow: 0 1px 2px #000;
   word-wrap: break-word;
+}
+
+#screen .item.paragraphs[dir="rtl"], #regions .region[dir="rtl"] {
+  text-align: right;
 }
 
 /* Hızlı konuşmada önceki satır kısa süre yeni satırın üstünde, daha küçük ve soluk durur; sonra solarak kalkar.
