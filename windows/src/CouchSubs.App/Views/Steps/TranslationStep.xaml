@@ -7,6 +7,9 @@
     <c:StepLayout Title="{t:T 'Download the translation model'}"
                   Message="{t:T 'CouchSubs translates on this computer, without the internet. The English–Turkish model (about 475 MB) is downloaded once and kept on this computer.'}">
         <StackPanel>
+            <TextBlock Text="Arabic mode: no local Turkish translation model is needed. Set your Gemini API key under Translation settings."
+                       Visibility="{Binding ArabicCloudMode, Converter={StaticResource VisibleIf}}"
+                       TextWrapping="Wrap" Style="{StaticResource HintText}" Margin="0,0,0,12" />
             <StackPanel Visibility="{Binding ModelDownloading, Converter={StaticResource VisibleIf}}">
                 <TextBlock Text="{t:T 'Downloading…'}" Style="{StaticResource HintText}" Margin="0,0,0,8" />
                 <ProgressBar Minimum="0" Maximum="1" Value="{Binding ModelProgress, Mode=OneWay}" />
