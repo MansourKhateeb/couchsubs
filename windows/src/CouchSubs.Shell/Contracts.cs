@@ -624,11 +624,19 @@ public interface IAppServices
     /// <paramref name="instruction"/>: Ayarlardaki "Ek talimat"; boşsa sistem talimatı değişmez.
     ITextTranslator? MakeAiTranslator(AiProvider provider, string key, string model, ITextTranslator? fallback, Func<string?>? game,
                                       string? instruction = null) => null;
+    ITextTranslator? MakeAiTranslatorForLanguage(AiProvider provider, string key, string model, ITextTranslator? fallback,
+                                                 Func<string?>? game, string targetLanguage, string? instruction = null) =>
+        targetLanguage == "tr" ? MakeAiTranslator(provider, key, model, fallback, game, instruction) : null;
     /// <summary>Yapay zekâ anahtarını örnek bir satırı çevirerek dener.</summary>
     Task<AiTestResult> TestAiKeyAsync(AiProvider provider, string key, string model) => Task.FromResult(new AiTestResult(OnlineKeyState.Unreachable));
+    Task<AiTestResult> TestAiKeyForLanguageAsync(AiProvider provider, string key, string model, string targetLanguage) =>
+        TestAiKeyAsync(provider, key, model);
     /// <summary>Yerel model (Ollama, LM Studio) çevirmeni; anahtar boş olabilir. Bu derlemede yoksa null.</summary>
     ITextTranslator? MakeLocalAiTranslator(LocalAiServer server, string key, ITextTranslator? fallback, Func<string?>? game,
                                            string? instruction = null) => null;
+    ITextTranslator? MakeLocalAiTranslatorForLanguage(LocalAiServer server, string key, ITextTranslator? fallback,
+                                                      Func<string?>? game, string targetLanguage, string? instruction = null) =>
+        targetLanguage == "tr" ? MakeLocalAiTranslator(server, key, fallback, game, instruction) : null;
     /// <summary>Yerel model sunucusunu örnek bir satırı çevirerek dener ("Bağlantıyı dene").</summary>
     Task<AiTestResult> TestLocalAiAsync(LocalAiServer server, string key) => Task.FromResult(new AiTestResult(OnlineKeyState.Unreachable));
     /// <summary>Türkçe dublaj modeli; bu derlemede yoksa null.</summary>
