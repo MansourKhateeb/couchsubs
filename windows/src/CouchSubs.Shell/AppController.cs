@@ -370,9 +370,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public int ServerPort { get; private set; } = DefaultServerPort;
 
     /// <summary>Bu oyun dilinden hedef dile çeviri modeli var mı (ayarlarda listelenecek diller).</summary>
-    public bool SupportsLanguage(string source) => services.Translation.IsSupported(source, settings.TargetLanguage);
+    public bool SupportsLanguage(string source) =>
+        settings.TargetLanguage == "ar" ? source == "en" : services.Translation.IsSupported(source, settings.TargetLanguage);
 
     public bool ModelInstalled => services.Translation.IsInstalled(settings.SourceLanguage, settings.TargetLanguage);
+    public bool ArabicCloudMode => settings.TargetLanguage == "ar";
     public bool ModelDownloading { get => modelDownloading; private set => Set(ref modelDownloading, value); }
     public double ModelProgress { get => modelProgress; private set => Set(ref modelProgress, value); }
     public string? ModelError { get => modelError; private set => Set(ref modelError, value); }
@@ -386,6 +388,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             var old = settings;
             if (!Set(ref settings, value, [nameof(UsesFreeGemini)])) return;
             settingsStore.Save(value);
+            if (old.TargetLanguage != value.TargetLanguage)
+                Changed(nameof(ArabicCloudMode), nameof(ModelInstalled), nameof(CanAdvance), nameof(OnlineTranslationActive));
             server.SendStyle(value.Style);
             if (old.Output != value.Output) OutputChanged();
             if (old.Dubbing != value.Dubbing) DubbingSettingsChanged(old.Dubbing);
@@ -444,7 +448,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         OnboardingStep.PsnLogin => IsXbox ? xboxToken is not null : accountId is not null,
         OnboardingStep.Console => IsXbox ? xboxConsole is not null : console is not null,
         OnboardingStep.Tv => HasTv || settings.Output == SubtitleOutput.Computer,
-        OnboardingStep.Translation => ModelInstalled,
+        OnboardingStep.Translation => settings.TargetLanguage == "ar" || ModelInstalled,
         _ => false,
     };
 
@@ -1003,7 +1007,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public void StartModelDownload()
     {
-        if (ModelInstalled || modelDownload is { IsCompleted: false }) return;
+        if (settings.TargetLanguage == "ar" || ModelInstalled || modelDownload is { IsCompleted: false }) return;
         ModelDownloading = true;
         ModelError = null;
         var download = services.Translation.DownloadAsync(settings.SourceLanguage, settings.TargetLanguage, new ImmediateProgress(value => post(() => ModelProgress = value)), CancellationToken.None);
@@ -1938,7 +1942,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Pakette olmayan İngilizce satır havuza önerilir (paketler kapalıysa da yalnız hiçbir pakette olmayanlar).</summary>
     private void OfferToPool(string text)
     {
-        if (settings.SourceLanguage != "en" || services.Pool is not { } pool) return;
+        if (settings.SourceLanguage != "en" || settings.TargetLanguage != "tr" || services.Pool is not { } pool) return;
         if (!PacksActive && services.FindInPacks(text) is not null) return;
         pool.Offer(text);
     }
@@ -2079,13 +2083,14 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (engine == TranslationEngine.Local && settings.LocalAiServer is { } server)
         {
             // Yerel modelin anahtarı isteğe bağlıdır; önbellekte sunucu ve model ayrı tutulur.
-            online = services.MakeLocalAiTranslator(server, store.Load<string>(storeKey) ?? "", fallback, game, settings.AiInstruction);
+            online = services.MakeLocalAiTranslatorForLanguage(server, store.Load<string>(storeKey) ?? "", fallback, game, settings.TargetLanguage, settings.AiInstruction);
         }
         else
         {
             if (store.Load<string>(storeKey) is not { Length: > 0 } key) return local;
             online = engine.Provider() is { } provider
-                ? services.MakeAiTranslator(provider, key, provider.Model(settings.ModelFor(provider)).Id, fallback, game, settings.AiInstruction)
+                ? services.MakeAiTranslatorForLanguage(provider, key, provider.Model(settings.ModelFor(provider)).Id, fallback, game,
+                                                      settings.TargetLanguage, settings.AiInstruction)
                 : services.MakeOnlineTranslator(key, fallback);
         }
         if (online is null) return local;
@@ -2117,7 +2122,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     /// <summary>Çevrimiçi çeviri yalnız İngilizce→Türkçe için ve seçili motor hazırsa açılır.</summary>
     public bool OnlineTranslationActive =>
-        settings.OnlineTranslation && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && IsReady(settings.OnlineEngine);
+        settings.OnlineTranslation && settings.SourceLanguage == "en" &&
+        (settings.TargetLanguage == "tr" ||
+         (settings.TargetLanguage == "ar" && settings.OnlineEngine != TranslationEngine.DeepL)) &&
+        IsReady(settings.OnlineEngine);
 
     /// <summary>
     /// Motor kullanılabilir mi: bulut motorlarında anahtar kayıtlıdır; yerel modelde anahtar gerekmez, adres ve model adı
@@ -2155,7 +2163,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public async Task<AiTestResult> SetAiKeyAsync(AiProvider provider, string key)
     {
         key = key.Trim();
-        var result = await services.TestAiKeyAsync(provider, key, provider.Model(settings.ModelFor(provider)).Id);
+        var result = await services.TestAiKeyForLanguageAsync(provider, key, provider.Model(settings.ModelFor(provider)).Id, settings.TargetLanguage);
         if (result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected or OnlineKeyState.Busy)
             SaveKey(provider.Engine(), key);
         return result;
@@ -2164,7 +2172,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Kayıtlı anahtar ve modelle örnek satırı çevirir (ayarlardaki "Dene").</summary>
     public Task<AiTestResult> TestAiKeyAsync(AiProvider provider) =>
         provider.Engine().StoreKey() is { } storeKey && store.Load<string>(storeKey) is { Length: > 0 } key
-            ? services.TestAiKeyAsync(provider, key, provider.Model(settings.ModelFor(provider)).Id)
+            ? services.TestAiKeyForLanguageAsync(provider, key, provider.Model(settings.ModelFor(provider)).Id, settings.TargetLanguage)
             : Task.FromResult(new AiTestResult(OnlineKeyState.Invalid));
 
     /// <summary>
@@ -2214,6 +2222,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         var translation = services.Translation;
         TranslatorStatus = OnlineTranslationActive ? TranslatorStatus.Ready
+            : settings.TargetLanguage == "ar" ? TranslatorStatus.NeedsDownload
             : !translation.IsSupported(settings.SourceLanguage, settings.TargetLanguage) ? TranslatorStatus.Unsupported
             : !translation.IsInstalled(settings.SourceLanguage, settings.TargetLanguage) ? TranslatorStatus.NeedsDownload
             : translation.EngineFailed ? TranslatorStatus.EngineFailed
