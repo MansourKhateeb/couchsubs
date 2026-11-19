@@ -44,7 +44,8 @@ public partial class TvAppCard : UserControl
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
         // Tv: TV adresi değişince Samsung adımındaki "Host PC IP" de yeniden seçilir.
-        if (e.PropertyName is nameof(AppController.TvApp) or nameof(AppController.DevModeHoursLeft) or nameof(AppController.Tv))
+        if (e.PropertyName is nameof(AppController.TvApp) or nameof(AppController.DevModeHoursLeft)
+            or nameof(AppController.Tv) or nameof(AppController.TvClients))
             Dispatcher.Invoke(() => Show(controller!.TvApp));
     }
 
@@ -61,7 +62,12 @@ public partial class TvAppCard : UserControl
         var text = Localizer.Current;
         var brand = controller?.Tv?.Brand ?? TvBrand.Lg;
         var devModeOff = state.Kind == TvAppKind.DevModeOff;
-        Visibility = Visible(state.Kind != TvAppKind.Unknown);
+        // A launch acknowledgement is not proof the LG app is installed or running.
+        // When there is no connected TV app, always offer an explicit installation path.
+        var manualLg = state.Kind == TvAppKind.Unknown && brand == TvBrand.Lg
+            && controller is { Tv: not null, TvClients: 0, CanInstallTvApp: true };
+        Visibility = Visible(state.Kind != TvAppKind.Unknown || manualLg);
+        ManualLgInstall.Visibility = Visible(manualLg);
         LgSteps.Visibility = Visible(devModeOff && brand == TvBrand.Lg);
         // TV bu bilgisayarı kabul etmediyse de adımlar (Host PC IP satırı bu bilgisayarın adresiyle) görünür (#343).
         var hostPcProblem = state.Kind == TvAppKind.Failed && state.Error is DevModeError.Unreachable or DevModeError.HostPcMismatch;
@@ -89,6 +95,7 @@ public partial class TvAppCard : UserControl
             TvAppKind.NeedsPassphrase => text["Developer Mode is on. One last step to install the TV app:"],
             TvAppKind.SignIn => text["The Samsung account page opened in your browser. Finish signing in there. If you do not see it, switch to the browser or press Open the page again."],
             TvAppKind.ApproveOnTv => text["Look at the TV: it asks whether to allow debugging from this computer."],
+            TvAppKind.Unknown when manualLg => "LG TV is paired but the CouchSubs TV app is not connected. Install the TV app using Developer Mode.",
             _ => "",
         };
         Detail.Text = state.Kind switch
@@ -108,6 +115,9 @@ public partial class TvAppCard : UserControl
         if (devModeOff || (brand == TvBrand.Samsung && state.Error == DevModeError.HostPcMismatch)) devModeWatch.Start();
         else devModeWatch.Stop();
     }
+
+    private void OnManualLgInstall(object sender, RoutedEventArgs e) =>
+        controller?.RequestLgTvInstallation();
 
     private async void OnInstall(object sender, RoutedEventArgs e)
     {
