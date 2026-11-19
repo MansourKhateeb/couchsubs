@@ -712,6 +712,17 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     // --- TV uygulamasını kurma ---
 
+    /// <summary>
+    /// Allow manual LG app installation when SSAP accepted a launch request but no TV app
+    /// actually connected. Requesting installation only shows the passphrase form; the
+    /// existing version check avoids reinstalling an already installed package.
+    /// </summary>
+    public void RequestLgTvInstallation()
+    {
+        if (tv is not { Brand: TvBrand.Lg } || !CanInstallTvApp) return;
+        TvApp = new TvAppState(TvAppKind.NeedsPassphrase);
+    }
+
     public TvAppState TvApp
     {
         get => tvApp;
