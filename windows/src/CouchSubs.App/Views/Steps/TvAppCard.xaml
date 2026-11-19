@@ -9,6 +9,8 @@
         <StackPanel>
             <TextBlock x:Name="Status" TextWrapping="Wrap" />
             <TextBlock x:Name="Detail" Style="{StaticResource HintText}" Margin="0,4,0,0" Visibility="Collapsed" />
+            <Button x:Name="ManualLgInstall" Content="Install CouchSubs on LG TV"
+                    HorizontalAlignment="Left" Margin="0,8,0,0" Visibility="Collapsed" Click="OnManualLgInstall" />
             <StackPanel x:Name="LgSteps" Visibility="Collapsed" Margin="0,8,0,0">
                 <TextBlock Style="{StaticResource HintText}" Text="{t:T '1. Create a free account at webostv.developer.lge.com.'}" />
                 <TextBlock Style="{StaticResource HintText}" Text="{t:T '2. On the TV, install Developer Mode from the LG Content Store and sign in.'}" />
