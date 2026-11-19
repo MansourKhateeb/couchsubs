@@ -2044,6 +2044,19 @@ public class TvAppInstallTests
     }
 
     [Fact]
+    public async Task ManualLgInstallOffersPassphraseWhenLaunchWasAcknowledgedButNoAppConnected()
+    {
+        var controller = Make(new FakeServices { DevMode = true });
+        await controller.PairAsync(Tv);
+        Assert.Equal(TvAppKind.Unknown, controller.TvApp.Kind);
+
+        controller.RequestLgTvInstallation();
+
+        Assert.Equal(TvAppKind.NeedsPassphrase, controller.TvApp.Kind);
+        controller.Dispose();
+    }
+
+    [Fact]
     public async Task WorkingAppWithoutKeyAsksNothing()
     {
         var controller = Make(new FakeServices { DevMode = true });
