@@ -64,6 +64,7 @@ public final class RegionWatcher {
     public var packLookup: ((String) -> PackMatch?)?
     /// Hedef dil Türkçe: yüksek güvenle Türkçe olan parça çevrilmez, aslı sayılır (#289).
     public var skipsTurkish = true
+    public var hideSoundEffects = false
     public var onLog: ((String) -> Void)?
     /// Her okumanın süresi (ms; ölçüm için).
     public var onReadMs: ((Int) -> Void)?
@@ -152,7 +153,7 @@ public final class RegionWatcher {
         }
         reads += 1
         onReadMs?(now() - started)
-        let candidate = Self.candidate(reading, in: region)
+        let candidate = Self.candidate(reading, in: region, hideSoundEffects: hideSoundEffects)
         if state.lastRead == candidate.key {
             state.candidate = nil
             states[area.id] = state
@@ -166,8 +167,9 @@ public final class RegionWatcher {
 
     /// Okumadan çevrilecek parçalar: kumanda ipuçları, yazı tanıma çöpleri ve harfsiz göstergeler ("23m", "9") atılır;
     /// satırlar yukarıdan aşağı parçalara toplanır (başlık, cümle, madde).
-    static func candidate(_ reading: Reading, in region: CropRegion) -> Candidate {
-        let lines = reading.withoutButtonPrompts().withoutOcrNoise().lines
+    static func candidate(_ reading: Reading, in region: CropRegion, hideSoundEffects: Bool = false) -> Candidate {
+        let cleaned = reading.withoutButtonPrompts().withoutOcrNoise()
+        let lines = (hideSoundEffects ? SoundEffects.removing(from: cleaned) : cleaned).lines
             .filter { ScreenTranslation.isWords($0.text) }
             .sorted { ($0.box?.top ?? 0) < ($1.box?.top ?? 0) }
         let paragraphs = ScreenTranslation.paragraphs(lines)

@@ -9,6 +9,19 @@ final class ScreenTranslationTests: XCTestCase {
         TextLine(text, box: TextBox(left: left, top: top, right: right, bottom: top + height))
     }
 
+    func testSoundEffectsAreRemovedBeforeTranslatingScreenGroups() async throws {
+        let reading = Reading(lines: [line("[Door slams]", 0.1, 0.3, 0.25),
+                                      line("ROSE: (sobbing) Don't go!", 0.4, 0.8, 0.6)])
+        var requests: [String] = []
+        let items = try await ScreenTranslation.translate(reading, using: {
+            requests.append($0)
+            return "ROSE: لا تذهب!"
+        }, hideSoundEffects: true)
+        XCTAssertEqual(requests, ["ROSE: Don't go!"])
+        XCTAssertEqual(items.map(\.source), requests)
+        XCTAssertEqual(items.map(\.translation), ["ROSE: لا تذهب!"])
+    }
+
     func testLinesFarApartBecomeSeparateGroups() {
         let groups = ScreenTranslation.groups(Reading(lines: [
             line("Find the blacksmith in", 0.05, 0.10, 0.30),

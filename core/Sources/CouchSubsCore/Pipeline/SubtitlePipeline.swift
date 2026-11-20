@@ -137,6 +137,7 @@ public final class SubtitlePipeline {
     public var packLookup: ((String) -> PackMatch?)?
     /// Konuşan adı ("ARTHUR: …") TV'ye giden çeviride gösterilir; kapalıysa yalnız cümle gider.
     public var showSpeakerNames = true
+    public var hideSoundEffects = false
     /// Hedef dil Türkçe: yüksek güvenle Türkçe olan satır (`TurkishText.isSure`) çevirmene gönderilmez (#289). Uygulama
     /// hedef dil Türkçe değilse kapatır.
     public var skipsTurkish = true
@@ -217,7 +218,8 @@ public final class SubtitlePipeline {
         // Yazı tanımanın uydurduğu sözcük çöpleri ("ou$3e") de çevirmene gitmez.
         // Alandaki menü ve köşe göstergeleri de altyazı değildir; yalnız altyazı bloğu çevrilir ve kutusu ona göre olur.
         let place = TextBox(left: region.left, top: region.top, right: region.right, bottom: region.bottom)
-        let reading = lastReading.withoutButtonPrompts().withoutOcrNoise().joiningRows().subtitleBlock(in: place)
+        let rows = lastReading.withoutButtonPrompts().withoutOcrNoise().joiningRows()
+        let reading = (hideSoundEffects ? SoundEffects.removing(from: rows) : rows).subtitleBlock(in: place)
         currentRead = ReadInfo(capturedAt: captured, ocrMs: lastReadMs, confidence: reading.confidence)
         let box = reading.box?.placed(in: place).centeredOnScreen()
         if !sawText, !reading.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

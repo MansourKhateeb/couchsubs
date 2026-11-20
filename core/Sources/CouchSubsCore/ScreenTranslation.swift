@@ -39,10 +39,10 @@ public enum ScreenTranslation {
 
     /// Grupları sırayla çevirir; her grup çevrilince o ana kadarki sonuçlarla `progress` çağrılır. Çevirisi aslıyla
     /// aynı olan (ad, sayı, zaten Türkçe yazı) grup gösterilmez.
-    public static func translate(_ reading: Reading, using translate: (String) async throws -> String,
+    public static func translate(_ reading: Reading, using translate: (String) async throws -> String, hideSoundEffects: Bool = false,
                                  progress: ([Item]) -> Void = { _ in }) async throws -> [Item] {
         var items: [Item] = []
-        for group in groups(reading) {
+        for group in groups(reading, hideSoundEffects: hideSoundEffects) {
             try Task.checkCancellation()
             var translated: [String] = []
             for paragraph in group.paragraphs { translated.append(try await translate(paragraph)) }
@@ -55,12 +55,13 @@ public enum ScreenTranslation {
 
     /// Çevirmen parçaları tek istekte çevirebiliyorsa (yapay zekâ) ekranın bütün parçaları birlikte gider ve sonuç bir
     /// kerede gelir; yoksa gruplar sırayla çevrilip hazırlandıkça bildirilir.
-    public static func translate(_ reading: Reading, using translator: TextTranslator,
+    public static func translate(_ reading: Reading, using translator: TextTranslator, hideSoundEffects: Bool = false,
                                  progress: ([Item]) -> Void = { _ in }) async throws -> [Item] {
         guard translator.translatesTogether else {
-            return try await translate(reading, using: { try await translator.translate($0) }, progress: progress)
+            return try await translate(reading, using: { try await translator.translate($0) },
+                                       hideSoundEffects: hideSoundEffects, progress: progress)
         }
-        let groups = groups(reading)
+        let groups = groups(reading, hideSoundEffects: hideSoundEffects)
         let paragraphs = groups.flatMap(\.paragraphs)
         guard !paragraphs.isEmpty else { return [] }
         let translations = try await translator.translateAll(paragraphs)
@@ -94,8 +95,9 @@ public enum ScreenTranslation {
     /// Satırları gruplara toplar. Kumanda ipuçları ve yazı tanıma çöpleri atılır; harfi olmayan ya da tek harfli satırlar
     /// ("23m", "9", "+") göstergedir, çevrilmez. Bir satır, üstündeki satırın hemen altındaysa, yatayda onunla üst üste
     /// biniyorsa ve yazı boyu benziyorsa o gruba katılır. Gruplar yukarıdan aşağı, en çok `maxGroups`.
-    public static func groups(_ reading: Reading) -> [Group] {
-        let lines = reading.withoutButtonPrompts().withoutOcrNoise().lines
+    public static func groups(_ reading: Reading, hideSoundEffects: Bool = false) -> [Group] {
+        let cleaned = reading.withoutButtonPrompts().withoutOcrNoise()
+        let lines = (hideSoundEffects ? SoundEffects.removing(from: cleaned) : cleaned).lines
             .filter { $0.box != nil && isWords($0.text) }
             .sorted { $0.box!.top < $1.box!.top }
         var groups: [[TextLine]] = []

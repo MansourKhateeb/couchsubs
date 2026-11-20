@@ -228,6 +228,27 @@ final class SubtitlePipelineTests: XCTestCase {
         XCTAssertEqual(pipeline.lastPair?.source, "Hold the gate.")
     }
 
+    func testSoundEffectsAreFilteredBeforePackLookupAndTranslation() async {
+        let sender = FakeSender(), translator = FakeTranslator()
+        let pipeline = SubtitlePipeline(reader: FakeReader([
+            "(gentle music)", "(gentle music)", "[Door slams] ROSE: Please, stay!", "ROSE: Please, stay! (footsteps thudding)",
+        ]), translator: translator, server: sender)
+        pipeline.hideSoundEffects = true
+        var lookups: [String] = []
+        pipeline.packLookup = { lookups.append($0); return nil }
+
+        await run(pipeline, 2)
+        XCTAssertTrue(lookups.isEmpty)
+        XCTAssertTrue(translator.requested.isEmpty)
+        XCTAssertTrue(sender.sent.isEmpty)
+
+        await run(pipeline, 2)
+        XCTAssertTrue(lookups.contains("ROSE: Please, stay!"))
+        XCTAssertTrue(lookups.allSatisfy { ["ROSE: Please, stay!", "Please, stay!"].contains($0) })
+        XCTAssertEqual(translator.requested, ["Please, stay!"])
+        XCTAssertEqual(sender.sent, ["ROSE: TR: Please, stay!"])
+    }
+
     /// Okuma sürerken hat sıfırlanırsa (Durdur, takılan okuma yüzünden yeniden kurulan hat) geç biten okuma yeni
     /// oturuma karışmaz: TV'ye eski satır gitmez, çevirmen çağrılmaz.
     func testReadFinishingAfterResetIsDropped() async {

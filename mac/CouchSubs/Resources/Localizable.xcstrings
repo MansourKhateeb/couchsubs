@@ -1596,6 +1596,22 @@
         }
       }
     },
+    "Hide sound effects": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide sound effects"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ses efektlerini gizle"
+          }
+        }
+      }
+    },
     "Bottom": {
       "localizations": {
         "en": {

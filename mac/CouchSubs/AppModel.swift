@@ -491,9 +491,11 @@ final class AppModel: ObservableObject {
                 || settings.localAIBaseURL != oldValue.localAIBaseURL || settings.localAIModel != oldValue.localAIModel
                 || settings.aiInstruction != oldValue.aiInstruction
             let languageChanged = targetChanged || settings.sourceLanguage != oldValue.sourceLanguage
+            let soundEffectsChanged = settings.hideSoundEffects != oldValue.hideSoundEffects
             if translationChanged || languageChanged { Task { await refreshTranslatorStatus() } }
-            if isRunning, languageChanged || translationChanged || settings.fastSubtitleDetection != oldValue.fastSubtitleDetection {
-                if languageChanged {
+            if isRunning, languageChanged || translationChanged || soundEffectsChanged
+                || settings.fastSubtitleDetection != oldValue.fastSubtitleDetection {
+                if languageChanged || soundEffectsChanged {
                     screenTask?.cancel()
                     screenTask = nil
                     hideScreen()
@@ -1470,13 +1472,14 @@ final class AppModel: ObservableObject {
         server.sendSubtitle(String(localized: "Translating the screen…"), durationMs: 2500)
         let reader = VisionReader(language: settings.sourceLanguage)
         let translator = makeTranslator()
+        let hideSoundEffects = settings.hideSoundEffects
         let server = self.server
         screenTask = Task { [weak self] in
             do {
                 let reading = try await Task.detached(priority: .userInitiated) { try reader.readLines(frame, deep: false) }.value
                 try Task.checkCancellation()
                 // Yapay zekâda ekranın bütün yazıları tek istekte gider (bkz. AITranslationCore.translateAll).
-                let items = try await ScreenTranslation.translate(reading, using: translator) { shown in
+                let items = try await ScreenTranslation.translate(reading, using: translator, hideSoundEffects: hideSoundEffects) { shown in
                     guard !Task.isCancelled else { return }
                     let milliseconds = ScreenTranslation.displayMilliseconds(shown)
                     server.sendScreen(shown, durationMs: milliseconds)
@@ -1544,6 +1547,7 @@ final class AppModel: ObservableObject {
                                         translator: makeTranslator(),
                                         server: server, scheduler: scheduler)
         pipeline.showSpeakerNames = settings.showSpeakerNames
+        pipeline.hideSoundEffects = settings.hideSoundEffects
         pipeline.skipsTurkish = settings.targetLanguage == "tr"
         pipeline.onPair = { [weak self, weak pipeline] source, translation in
             self?.lastSource = source
@@ -1575,6 +1579,7 @@ final class AppModel: ObservableObject {
         let watcher = RegionWatcher(reader: VisionReader(language: settings.sourceLanguage), translator: makeTranslator(), server: server)
         watcher.packLookup = packLookup
         watcher.skipsTurkish = settings.targetLanguage == "tr"
+        watcher.hideSoundEffects = settings.hideSoundEffects
         watcher.onLog = { SubtitleLog.write($0) }
         return watcher
     }

@@ -117,6 +117,11 @@ public struct UserSettings: Codable, Equatable {
     public var style = SubtitleStyle()
     public var sourceLanguage = "en"
     public var targetLanguage = "tr"
+    private var hideSoundEffectsByLanguage: [String: Bool] = [:]
+    public var hideSoundEffects: Bool {
+        get { hideSoundEffectsByLanguage[targetLanguage] ?? (targetLanguage == "ar") }
+        set { hideSoundEffectsByLanguage[targetLanguage] = newValue }
+    }
     public var dubbing = DubbingSettings()
     /// Açıksa çeviri `onlineEngine` ile yapılır (anahtarı kayıtlıysa); kapalıysa ya da hizmete ulaşılamazsa Apple'ın
     /// cihaz üstü çevirisi. Eski sürümlerde yalnız DeepL vardı; o kayıtlar DeepL ile açılır.
@@ -178,6 +183,7 @@ public struct UserSettings: Codable, Equatable {
         style = try values.decodeIfPresent(SubtitleStyle.self, forKey: .style) ?? defaults.style
         sourceLanguage = try values.decodeIfPresent(String.self, forKey: .sourceLanguage) ?? defaults.sourceLanguage
         targetLanguage = try values.decodeIfPresent(String.self, forKey: .targetLanguage) ?? defaults.targetLanguage
+        hideSoundEffectsByLanguage = (try? values.decodeIfPresent([String: Bool].self, forKey: .hideSoundEffectsByLanguage)) ?? [:]
         dubbing = (try? values.decodeIfPresent(DubbingSettings.self, forKey: .dubbing)) ?? defaults.dubbing
         onlineTranslation = try values.decodeIfPresent(Bool.self, forKey: .onlineTranslation) ?? defaults.onlineTranslation
         let engine = (try? values.decodeIfPresent(TranslationEngine.self, forKey: .onlineEngine)) ?? defaults.onlineEngine
