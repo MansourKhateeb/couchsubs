@@ -1652,7 +1652,7 @@ final class AppModel: ObservableObject {
     var translationEngines: [TranslationEngine] {
         switch settings.targetLanguage {
         case "tr": TranslationEngine.allCases
-        case "ar": [.free, .gemini]
+        case "ar": [.free, .gemini, .openAI]
         default: [.free]
         }
     }

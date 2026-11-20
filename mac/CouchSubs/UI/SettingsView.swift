@@ -1141,7 +1141,12 @@ private struct AIKeySection: View {
         Picker("Model", selection: Binding(get: { provider.model(model.settings.model(for: provider)).id },
                                            set: { model.settings.setModel($0, for: provider) })) {
             ForEach(provider.models, id: \.id) { option in
-                Text(LocalizedStringKey(option.label)).tag(option.id)
+                if provider == .openAI {
+                    let label = String(localized: String.LocalizationValue(option.label))
+                    Text(verbatim: "\(option.id) · \(label)").tag(option.id)
+                } else {
+                    Text(LocalizedStringKey(option.label)).tag(option.id)
+                }
             }
         }
         if model.hasKey(engine) {

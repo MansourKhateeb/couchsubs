@@ -227,7 +227,7 @@ public enum AIFailure: Error, Equatable, Sendable {
 /// Hizmetin bildirdiği dakikalık istek sınırı aşımı (429). Gün sınırından farklı olarak kısa sürer; kullanıcıya hata
 /// gösterilmez, birkaç saniye o satırlar yerel çeviriyle çevrilir.
 public struct AIRateLimit: Equatable, Sendable {
-    /// Hizmetin önerdiği bekleme ("retryDelay"); yoksa nil.
+    /// Service-provided delay in seconds (Gemini retryDelay or OpenAI Retry-After).
     public var retryAfter: TimeInterval?
     /// Hizmetin bildirdiği dakikalık istek sınırı ("quotaValue"); yoksa nil.
     public var requestsPerMinute: Int?
@@ -375,10 +375,13 @@ public enum AIRequest {
             // POST /v1/chat/completions, "Authorization: Bearer"; "developer" iletisi yönergedir.
             request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
             request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            let guidance = "Render slang, idioms and profanity in natural Arabic at the same register. Keep humor and the character's voice in short, readable lines."
+            let instructions = targetLanguage == "ar" ? system + "\n\n" + guidance : system
             body = [
                 "model": model.id,
-                "messages": [["role": "developer", "content": system], ["role": "user", "content": user]],
+                "messages": [["role": "developer", "content": instructions], ["role": "user", "content": user]],
                 "max_completion_tokens": maxOutputTokens,
+                "store": false,
             ]
             if let effort = model.effort { body["reasoning_effort"] = effort }
         case .claude:
@@ -552,10 +555,21 @@ public enum AIRequest {
     /// `quotaExceeded` olarak kullanıcıya gösterilir). Gemini'nin hata gövdesinde error.details[] içinde
     /// google.rpc.QuotaFailure (violations[].quotaId, ör. "GenerateRequestsPerMinutePerProjectPerModel-FreeTier",
     /// quotaValue "15") ve google.rpc.RetryInfo (retryDelay "37s") bulunur.
-    public static func rateLimit(status: Int, body: Data) -> AIRateLimit? {
+    public static func rateLimit(status: Int, body: Data, provider: AIProvider = .gemini,
+                                 retryAfter: String? = nil) -> AIRateLimit? {
         guard status == 429,
               let root = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              let details = (root["error"] as? [String: Any])?["details"] as? [[String: Any]] else { return nil }
+              let error = root["error"] as? [String: Any] else { return nil }
+        if provider == .openAI {
+            let code = error["code"] as? String
+            let type = error["type"] as? String
+            // Quota and spend limits also return 429. Only pause as a transient rate limit for recognized codes.
+            guard type != "insufficient_quota",
+                  code == "rate_limit_exceeded" || code == "slow_down" || (code == nil && type == "rate_limit_error") else { return nil }
+            let seconds = retryAfter.flatMap { TimeInterval($0.trimmingCharacters(in: .whitespaces)) }
+            return AIRateLimit(retryAfter: seconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil })
+        }
+        guard let details = error["details"] as? [[String: Any]] else { return nil }
         let violations = details.flatMap { $0["violations"] as? [[String: Any]] ?? [] }
         let ids = violations.compactMap { $0["quotaId"] as? String }
         // Günlük sınır doldu: dakikalık beklemeyle geçmez, kullanıcı bilmeli.
@@ -695,11 +709,10 @@ public final class AITranslationCore: @unchecked Sendable {
         var translations: [String?] = pieces.map { $0.translate ? cache.value(for: self.cacheKey($0.text, game: game)) : nil }
         let missing = pieces.indices.filter { pieces[$0].translate && translations[$0] == nil }
         let sources = missing.map { SubtitleSegmenter.normalizeCase(pieces[$0].text, names: names.all) }
-        // Hizmetin beklemesi yalnız eksik çeviriler içindir; önbellekteki parçalar yerel motor istemez. Hata sonrası
-        // beklemede yerel çeviri yoksa (indirilmemiş, açılamadı) satır düşmesin: hizmet yine denenir. 429 beklemesi kalır.
+        // Backoff only applies to uncached sentences. OpenAI and transient 429s stay paused even without Apple Translation.
         let (paused, pausedForLimit) = lock.withLock { (Date() < pausedUntil, pauseRateLimited) }
         if !sources.isEmpty, paused {
-            if pausedForLimit { return remember(try await fallback(text), for: text, game: game) }
+            if pausedForLimit || provider == .openAI { return remember(try await fallback(text), for: text, game: game) }
             if let local = try await Self.tryFallback(text, fallback: fallback) { return remember(local, for: text, game: game) }
         }
         // Dakikalık hak bittiyse satır sessizce yerel çeviriyle çevrilir (hata değildir). Hak uygulamanın temkinli
@@ -720,14 +733,7 @@ public final class AITranslationCore: @unchecked Sendable {
         } catch let error as URLError where error.code == .cancelled && Task.isCancelled {
             throw CancellationError()
         } catch let error as AIRateLimited {
-            // Dakikalık sınır: kısa beklenir, ana ekranda uyarı çıkmaz; hizmet daha düşük sınır bildirdiyse ona inilir.
-            if let perMinute = error.limit.requestsPerMinute { budget?.lower(to: perMinute) }
-            let pause = max(1, min(error.limit.retryAfter ?? Self.rateLimitPause, Self.rateLimitPause))
-            lock.withLock {
-                rateLimited = true
-                pausedUntil = Date().addingTimeInterval(pause)
-                pauseRateLimited = true
-            }
+            pauseAfterRateLimit(error.limit)
             return remember(try await fallback(text), for: text, game: game)
         } catch {
             setFailure(error as? AIFailure ?? .unreachable)
@@ -818,13 +824,7 @@ public final class AITranslationCore: @unchecked Sendable {
             } catch let error as URLError where error.code == .cancelled && Task.isCancelled {
                 throw CancellationError()
             } catch let error as AIRateLimited {
-                if let perMinute = error.limit.requestsPerMinute { budget?.lower(to: perMinute) }
-                let pause = max(1, min(error.limit.retryAfter ?? Self.rateLimitPause, Self.rateLimitPause))
-                lock.withLock {
-                    rateLimited = true
-                    pausedUntil = Date().addingTimeInterval(pause)
-                    pauseRateLimited = true
-                }
+                pauseAfterRateLimit(error.limit)
                 failed = true
             } catch {
                 setFailure(error as? AIFailure ?? .unreachable)
@@ -893,6 +893,17 @@ public final class AITranslationCore: @unchecked Sendable {
         if changed { onFailureChanged?(value) }
     }
 
+    private func pauseAfterRateLimit(_ limit: AIRateLimit) {
+        if let perMinute = limit.requestsPerMinute { budget?.lower(to: perMinute) }
+        let requested = limit.retryAfter ?? Self.rateLimitPause
+        let pause = max(1, provider == .openAI ? requested : min(requested, Self.rateLimitPause))
+        lock.withLock {
+            rateLimited = true
+            pausedUntil = Date().addingTimeInterval(pause)
+            pauseRateLimited = true
+        }
+    }
+
     private func request(_ sentences: [String], context: [AIContextLine], game: String?, names: [String]) async throws -> [String] {
         try await perform(count: sentences.count, session: session) { thinkingOff in
             AIRequest.make(provider: provider, key: key, model: model, sentences: sentences, context: context, game: game,
@@ -935,7 +946,10 @@ public final class AITranslationCore: @unchecked Sendable {
         }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             if thinkingOff, http.statusCode == 400 { throw ThinkingRejected() }
-            if let limit = AIRequest.rateLimit(status: http.statusCode, body: data) { throw AIRateLimited(limit: limit) }
+            if let limit = AIRequest.rateLimit(status: http.statusCode, body: data, provider: provider,
+                                               retryAfter: http.value(forHTTPHeaderField: "Retry-After")) {
+                throw AIRateLimited(limit: limit)
+            }
             throw AIRequest.failure(status: http.statusCode, body: data)
         }
         return try AIRequest.translations(from: AIRequest.text(provider: provider, from: data), count: count)
