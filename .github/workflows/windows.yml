@@ -186,7 +186,13 @@ jobs:
       - name: Yayınla
         shell: bash
         run: |
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION=0.1.0-dev; fi
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [[ "$GITHUB_REF_NAME" == "feature/arabic-windows" ]]; then
+            VERSION="0.1.1-arabic.${GITHUB_RUN_NUMBER}"
+          else
+            VERSION="0.1.0-dev"
+          fi
           dotnet publish windows/src/CouchSubs.App -c Release -r win-x64 --self-contained -o publish/CouchSubs -p:Version="$VERSION" \
             -p:CouchSubsPacksUrl=https://couchsubs-packs.enmera.workers.dev
 
@@ -285,7 +291,13 @@ jobs:
       - name: Kurulum dosyası
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "0.1.0-dev" }
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $env:GITHUB_REF_NAME.TrimStart("v")
+          } elseif ($env:GITHUB_REF_NAME -eq "feature/arabic-windows") {
+            "0.1.1-arabic.$($env:GITHUB_RUN_NUMBER)"
+          } else {
+            "0.1.0-dev"
+          }
           Copy-Item -Recurse publish/CouchSubs pack
           Copy-Item LICENSE, THIRD-PARTY-NOTICES.md pack/
           dotnet tool install -g vpk --version 1.2.161
