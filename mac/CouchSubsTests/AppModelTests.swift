@@ -854,7 +854,7 @@ final class AppModelRunTests: XCTestCase {
 
         model.settings.targetLanguage = "ar"
         XCTAssertEqual(model.settings.translationEngine, .deepL)
-        XCTAssertEqual(model.translationEngines, [.free, .gemini])
+        XCTAssertEqual(model.translationEngines, [.free, .gemini, .openAI])
         XCTAssertFalse(model.onlineTranslationActive)
         XCTAssertFalse(model.gamePacksActive)
         XCTAssertFalse(model.dubbingActive)
@@ -900,6 +900,46 @@ final class AppModelRunTests: XCTestCase {
             }
         }
         XCTAssertNotNil(subtitle)
+    }
+
+    func testArabicOpenAIKeyLifecyclePreservesGeminiKeyAndModelPreference() async throws {
+        let services = FakeServices()
+        let store = MemoryStore()
+        store.save("gemini-test-key", for: StoreKey.geminiKey)
+        let defaults = UserDefaults.isolated()
+        let model = AppModel(services: services, store: store, defaults: defaults)
+        model.settings.targetLanguage = "ar"
+        XCTAssertEqual(model.settings.openAIModel, "gpt-6-luna")
+        model.settings.translationEngine = .openAI
+        XCTAssertFalse(model.onlineTranslationActive)
+
+        services.aiResult = .failure(.invalidKey)
+        _ = await model.setAIKey("wrong-test-key", for: .openAI)
+        XCTAssertFalse(model.hasKey(.openAI))
+        XCTAssertNil(store.load(String.self, for: StoreKey.openAIKey))
+
+        services.aiResult = .success("لنذهب الآن.")
+        let result = await model.setAIKey(" openai-test-key ", for: .openAI)
+        XCTAssertEqual(result, .success("لنذهب الآن."))
+        XCTAssertEqual(store.load(String.self, for: StoreKey.openAIKey), "openai-test-key")
+        XCTAssertTrue(model.onlineTranslationActive)
+        model.settings.setModel("gpt-6.1-terra", for: .openAI)
+        let preferences = try XCTUnwrap(defaults.data(forKey: StoreKey.settings))
+        XCTAssertFalse(String(decoding: preferences, as: UTF8.self).contains("openai-test-key"))
+
+        let reopened = AppModel(services: services, store: store, defaults: defaults)
+        XCTAssertTrue(reopened.onlineTranslationActive)
+        let retest = await reopened.testAIKey(for: .openAI)
+        XCTAssertEqual(retest, .success("لنذهب الآن."))
+        XCTAssertEqual(services.aiTests.last?.provider, .openAI)
+        XCTAssertEqual(services.aiTests.last?.model, "gpt-6.1-terra")
+        XCTAssertEqual(services.aiTests.last?.targetLanguage, "ar")
+
+        reopened.removeKey(.openAI)
+        XCTAssertFalse(reopened.onlineTranslationActive)
+        XCTAssertEqual(reopened.settings.translationEngine, .free)
+        XCTAssertNil(store.load(String.self, for: StoreKey.openAIKey))
+        XCTAssertEqual(store.load(String.self, for: StoreKey.geminiKey), "gemini-test-key")
     }
 
     /// Çeviri başlamamışken bağlı olmamak bir uyarı değildir; nokta gri kalır.

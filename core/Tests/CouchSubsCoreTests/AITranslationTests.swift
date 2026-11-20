@@ -11,6 +11,7 @@ private final class FakeAI: URLProtocol {
     nonisolated(unsafe) static var failure: (status: Int, body: String)?
     /// Verilirse yanıt gelmez, istek zaman aşımına düşer.
     nonisolated(unsafe) static var timeout = false
+    nonisolated(unsafe) static var offline = false
     /// Verilirse hizmetin döndüğü metin bu olur.
     nonisolated(unsafe) static var replyText: String?
     /// İstek uçuşta iken oyun değişimini taklit eder; yanıt verilmeden çağrılır.
@@ -38,6 +39,10 @@ private final class FakeAI: URLProtocol {
         Self.onRequest?()
         if Self.timeout {
             client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+            return
+        }
+        if Self.offline {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
             return
         }
         let rejected = Self.rejectThinking && body["reasoning_effort"] != nil
@@ -111,6 +116,7 @@ final class AITranslationTests: XCTestCase {
         FakeAI.requests = []
         FakeAI.failure = nil
         FakeAI.timeout = false
+        FakeAI.offline = false
         FakeAI.replyText = nil
         FakeAI.onRequest = nil
         FakeAI.rejectThinking = false
@@ -427,6 +433,82 @@ final class AITranslationTests: XCTestCase {
         let messages = body["messages"] as? [[String: Any]] ?? []
         XCTAssertEqual(messages.map { $0["role"] as? String }, ["developer", "user"])
         XCTAssertEqual(messages[0]["content"] as? String, AIRequest.systemPrompt)
+    }
+
+    func testOpenAIArabicBatchesNewSentencesAndReusesTheCache() async throws {
+        let translator = AITranslator(provider: .openAI, key: secret, model: nil, fallback: WarmupFallback(),
+                                      session: FakeAI.session(), game: { "GTA VI" }, targetLanguage: "ar")
+        FakeAI.replyText = #"["تحرّك.","غطّني!"]"#
+        let source = "LUCIA: Move. Cover me!"
+        let result = try await translator.translate(source)
+        XCTAssertEqual(result, "LUCIA: تحرّك. غطّني!")
+        let cached = try await translator.translate(source)
+        XCTAssertEqual(cached, result)
+        XCTAssertEqual(FakeAI.requests.count, 1)
+        let (request, body) = try XCTUnwrap(FakeAI.requests.first)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(secret)")
+        let encodedBody = try JSONSerialization.data(withJSONObject: body)
+        XCTAssertFalse(String(decoding: encodedBody, as: UTF8.self).contains(secret))
+        XCTAssertEqual(body["model"] as? String, "gpt-6-luna")
+        XCTAssertEqual(body["reasoning_effort"] as? String, "none")
+        XCTAssertEqual(body["store"] as? Bool, false)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: String]])
+        XCTAssertTrue(try XCTUnwrap(messages.first?["content"]).contains("slang, idioms and profanity"))
+        XCTAssertTrue(user(0).contains("Game: GTA VI"))
+        XCTAssertTrue(user(0).contains("2 Arabic strings"))
+        XCTAssertTrue(user(0).hasSuffix(#"["Move.","Cover me!"]"#))
+    }
+
+    func testOpenAIArabicKeyTestUsesSelectedModel() async throws {
+        FakeAI.replyText = #"["لنذهب الآن.","ابقَ قربنا يا فتى."]"#
+        let result = await AITranslationCore.test(provider: .openAI, key: secret, model: "gpt-6.1-terra",
+                                                  session: FakeAI.session(), targetLanguage: "ar")
+        XCTAssertEqual(result, .success("KRATOS: لنذهب الآن. ابقَ قربنا يا فتى."))
+        XCTAssertEqual(FakeAI.requests.first?.body["model"] as? String, "gpt-6.1-terra")
+        XCTAssertTrue(user(0).contains("into Arabic"))
+    }
+
+    func testOpenAIRateLimitsAreDistinctFromBillingErrors() async throws {
+        let rateError = #"{"error":{"code":"rate_limit_exceeded","type":"tokens"}}"#
+        let billingError = #"{"error":{"code":"organization_spend_limit_exceeded","type":"insufficient_quota"}}"#
+        XCTAssertEqual(AIRequest.rateLimit(status: 429, body: Data(rateError.utf8), provider: .openAI, retryAfter: "45"),
+                       AIRateLimit(retryAfter: 45))
+        XCTAssertNil(AIRequest.rateLimit(status: 429, body: Data(billingError.utf8), provider: .openAI, retryAfter: "45"))
+
+        let throttled = make(.openAI)
+        FakeAI.failure = (429, rateError)
+        let first = try await throttled.translate("Move now.", fallback: local)
+        let second = try await throttled.translate("Wait here.", fallback: local)
+        XCTAssertEqual(first, "yerel: Move now.")
+        XCTAssertEqual(second, "yerel: Wait here.")
+        XCTAssertNil(throttled.lastFailure)
+        XCTAssertTrue(throttled.lastLineWasRateLimited)
+        XCTAssertEqual(FakeAI.requests.count, 1)
+
+        let billed = make(.openAI)
+        FakeAI.failure = (429, billingError)
+        let fallback = try await billed.translateAll(["Open the map", "Close the door"], fallback: local)
+        XCTAssertEqual(fallback, ["yerel: Open the map", "yerel: Close the door"])
+        XCTAssertEqual(billed.lastFailure, .quotaExceeded)
+        XCTAssertFalse(billed.lastLineWasRateLimited)
+        for text in ["Leave now.", "Stay close."] {
+            do {
+                _ = try await billed.translate(text) { _ in throw TranslatorError.unsupported }
+                XCTFail("Apple Translation is unavailable")
+            } catch {
+                XCTAssertEqual(error as? TranslatorError, .unsupported)
+            }
+        }
+        XCTAssertEqual(FakeAI.requests.count, 2)
+    }
+
+    func testOpenAINetworkFailureUsesTheExistingLocalFallback() async throws {
+        FakeAI.offline = true
+        let translator = make(.openAI)
+        let result = try await translator.translate("Get back!", fallback: local)
+        XCTAssertEqual(result, "yerel: Get back!")
+        XCTAssertEqual(translator.lastFailure, .unreachable)
+        XCTAssertEqual(FakeAI.requests.count, 1)
     }
 
     func testTranslatorWarmUpDoesNotSpendAIRequestOrSeedFirstSubtitleContext() async throws {
